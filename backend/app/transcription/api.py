@@ -1,4 +1,5 @@
 import logging
+import os
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
@@ -44,13 +45,16 @@ def transcribe_job(
         raise HTTPException(status_code=422, detail="Analysis range must be at least 0.5 seconds")
 
     existing = repository.get(job_id, start, end)
+    jev_enabled = os.getenv("JEV_VISION_ENABLED", "true").lower() not in {"0", "false", "no"}
     if existing:
-        return TranscriptionResult(
-            job_id=job_id,
-            start_seconds=start,
-            end_seconds=end,
-            **existing,
-        )
+        has_jev_metadata = bool(existing["notes"]) and all("jev_answer" in note for note in existing["notes"])
+        if not jev_enabled or has_jev_metadata:
+            return TranscriptionResult(
+                job_id=job_id,
+                start_seconds=start,
+                end_seconds=end,
+                **existing,
+            )
 
     trimmed_dir = AUDIO_DIR / job_id / "ranges" / f"{start:.3f}-{end:.3f}"
     trimmed_dir.mkdir(parents=True, exist_ok=True)

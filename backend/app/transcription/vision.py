@@ -6,6 +6,8 @@ import numpy as np
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision as mp_vision
 
+from app.transcription.jev_vision import JevVisionService
+
 
 class GuitarVisionService:
     COARSE_INTERVAL_SECONDS = 0.5
@@ -46,6 +48,7 @@ class GuitarVisionService:
                 **observation,
             })
 
+        jev = JevVisionService()
         enhanced_notes = []
         for note in notes:
             timestamp = float(note["start_seconds"])
@@ -57,24 +60,39 @@ class GuitarVisionService:
                 "visual_confidence": 0.0,
             }
 
+            jev_result = jev.infer_position(frame, int(note["midi"]))
+
+            visual_confidence = max(
+                float(observation["visual_confidence"]),
+                float(jev_result["visual_confidence"]),
+            )
             combined_confidence = min(
                 1.0,
                 float(note["confidence"])
-                * (0.55 + 0.45 * observation["visual_confidence"]),
+                * (0.55 + 0.45 * visual_confidence),
             )
-            visual_status = (
-                "hand-visible"
-                if observation["hands_visible"] > 0
-                else "hand-not-visible"
-            )
-            enhanced_notes.append(dict(
+
+            visual_status = jev_result["visual_status"]
+            if visual_status == "unavailable":
+                visual_status = "hand-visible" if observation["hands_visible"] > 0 else "hand-not-visible"
+
+            enhanced_note = dict(
                 note,
                 visual_status=visual_status,
-                visual_confidence=round(observation["visual_confidence"], 3),
+                visual_confidence=round(visual_confidence, 3),
                 combined_confidence=round(combined_confidence, 3),
-                visual_string=None,
-                visual_fret=None,
-            ))
+                visual_string=jev_result["visual_string"],
+                visual_fret=jev_result["visual_fret"],
+                jev_answer=jev_result["jev_answer"],
+                jev_probabilities=jev_result["jev_probabilities"],
+                answer_mass=jev_result["answer_mass"],
+            )
+
+            if jev_result["visual_string"] is not None:
+                enhanced_note["string"] = int(jev_result["visual_string"])
+                enhanced_note["fret"] = int(jev_result["visual_fret"])
+
+            enhanced_notes.append(enhanced_note)
 
         capture.release()
         landmarker.close()

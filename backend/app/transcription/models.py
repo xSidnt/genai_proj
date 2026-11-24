@@ -14,6 +14,9 @@ class TabNote(BaseModel):
     combined_confidence: float | None = None
     visual_string: int | None = None
     visual_fret: int | None = None
+    jev_answer: str | None = None
+    jev_probabilities: dict[str, float] = {}
+    answer_mass: float = 0.0
 
 
 class VideoObservation(BaseModel):

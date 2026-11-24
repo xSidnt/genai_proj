@@ -407,8 +407,11 @@ The current application supports an explicit analysis range:
 5. Basic Pitch detects notes in the trimmed segment.
 6. Detected timestamps are offset back onto the full-video timeline.
 7. MediaPipe analyzes frames near note onsets and coarse frames every 0.5 seconds.
-8. The API returns audio, visual, and combined confidence fields plus coarse hand/neck observations.
+8. Jev-Vision can classify pitch-compatible string/fret candidates at each detected note frame.
+9. The API returns audio, visual, and combined confidence fields, coarse hand/neck observations, Jev choices, probabilities, and answer mass.
 
-The vision pass reports hand visibility, fretting-hand plausibility, neck-edge visibility, and visual confidence. It does not claim exact string/fret detection until a calibrated fretboard detector is available.
+Jev-Vision is optional and lazy-loaded on Apple Silicon through MPS. Set `JEV_VISION_ENABLED=false` to disable it. It receives no more than the six standard-tuning candidates compatible with each detected MIDI pitch plus a no-visible-candidate option. A visual position overrides the Basic Pitch string/fret mapping only when Jev confidence and answer mass meet thresholds. Otherwise the original mapping remains in place and uncertainty is reported.
+
+The vision pass reports hand visibility, fretting-hand plausibility, neck-edge visibility, and visual confidence. Exact fret/string accuracy still requires real labeled guitar-frame evaluation and is not guaranteed by a general VQA-style checkpoint.
 
 Results are cached by `(job_id, start_seconds, end_seconds)` in SQLite. The original video and extracted WAV remain stored for frame analysis and evaluation.
