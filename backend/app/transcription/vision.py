@@ -21,6 +21,7 @@ class GuitarVisionService:
         start_seconds: float,
         end_seconds: float,
         notes: list[dict],
+        bpm: int | None = None,
     ) -> tuple[list[dict], list[dict]]:
         if not video_path.exists():
             return notes, []
@@ -49,18 +50,28 @@ class GuitarVisionService:
             })
 
         jev = JevVisionService()
+        subdivision_seconds = 60 / (bpm or 120) / 4
+        subdivision_cache: dict[tuple[int, int], tuple[np.ndarray | None, dict]] = {}
         enhanced_notes = []
         for note in notes:
             timestamp = float(note["start_seconds"])
-            frame = self._read_frame(capture, timestamp, fps)
+            midi = int(note["midi"])
+            subdivision = round((timestamp - start_seconds) / subdivision_seconds)
+            cache_key = (subdivision, midi)
+            if cache_key not in subdivision_cache:
+                subdivision_timestamp = start_seconds + subdivision * subdivision_seconds
+                frame = self._read_frame(capture, subdivision_timestamp, fps)
+                jev_result = jev.infer_position(frame, midi)
+                subdivision_cache[cache_key] = (frame, jev_result)
+            else:
+                frame, jev_result = subdivision_cache[cache_key]
+
             observation = self._observe_frame(frame, landmarker) if frame is not None else {
                 "hands_visible": 0,
                 "fretting_hand_visible": False,
                 "neck_visible": False,
                 "visual_confidence": 0.0,
             }
-
-            jev_result = jev.infer_position(frame, int(note["midi"]))
 
             visual_confidence = max(
                 float(observation["visual_confidence"]),

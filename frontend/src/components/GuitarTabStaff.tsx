@@ -12,6 +12,7 @@ interface GuitarTabStaffProps {
   notes: TabNote[]
   playbackTime: number
   durationSeconds: number
+  bpm: number
 }
 
 const STRINGS = [
@@ -23,70 +24,70 @@ const STRINGS = [
   { number: 6, tuning: 'E' },
 ]
 
-const PIXELS_PER_SECOND = 72
 const LEFT_GUTTER = 34
 const LANE_HEIGHT = 30
-const WINDOW_SECONDS = 8
+const PIXELS_PER_SUBDIVISION = 36
+const SUBDIVISIONS_PER_MEASURE = 16
+const SUBDIVISION_LABELS = ['1', 'e', '&', 'a', '2', 'e', '&', 'a', '3', 'e', '&', 'a', '4', 'e', '&', 'a']
 
-function formatTime(seconds: number) {
-  const minutes = Math.floor(seconds / 60)
-  const remainingSeconds = Math.floor(seconds % 60)
-  return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`
+function secondsToSixteenth(seconds: number, bpm: number) {
+  const sixteenthDuration = 60 / bpm / 4
+  return seconds / sixteenthDuration
 }
 
 export default function GuitarTabStaff({
   notes,
   playbackTime,
   durationSeconds,
+  bpm,
 }: GuitarTabStaffProps) {
-  const duration = Math.max(
-    durationSeconds,
-    1,
-    ...notes.map((note) => note.start_seconds + note.duration_seconds),
-  )
-  const rowCount = Math.max(1, Math.ceil(duration / WINDOW_SECONDS))
-  const ticks = Array.from({ length: WINDOW_SECONDS + 1 }, (_, second) => second)
-  const activeRow = Math.min(Math.floor(playbackTime / WINDOW_SECONDS), rowCount - 1)
+  const duration = Math.max(durationSeconds, 1)
+  const measureSeconds = 240 / bpm
+  const measureCount = Math.max(1, Math.ceil(duration / measureSeconds))
+  const playbackSubdivision = secondsToSixteenth(playbackTime, bpm)
+  const activeMeasure = Math.min(Math.floor(playbackSubdivision / SUBDIVISIONS_PER_MEASURE), measureCount - 1)
 
   return (
-    <div className="tab-scroll" aria-label="Scrollable guitar tablature">
-      {Array.from({ length: rowCount }, (_, rowIndex) => {
-        const startSeconds = rowIndex * WINDOW_SECONDS
-        const endSeconds = Math.min(startSeconds + WINDOW_SECONDS, duration)
-        const rowNotes = notes.filter(
-          (note) => note.start_seconds >= startSeconds && note.start_seconds < startSeconds + WINDOW_SECONDS,
-        )
-        const isActive = rowIndex === activeRow
-        const playheadX = LEFT_GUTTER + (playbackTime - startSeconds) * PIXELS_PER_SECOND
+    <div className="tab-scroll" aria-label="Scrollable BPM-based guitar tablature">
+      {Array.from({ length: measureCount }, (_, measureIndex) => {
+        const measureStartSubdivision = measureIndex * SUBDIVISIONS_PER_MEASURE
+        const measureEndSubdivision = measureStartSubdivision + SUBDIVISIONS_PER_MEASURE
+        const rowNotes = notes.filter((note) => {
+          const subdivision = secondsToSixteenth(note.start_seconds, bpm)
+          return subdivision >= measureStartSubdivision && subdivision < measureEndSubdivision
+        })
+        const isActive = measureIndex === activeMeasure
+        const playheadSubdivision = playbackSubdivision - measureStartSubdivision
+        const playheadX = LEFT_GUTTER + playheadSubdivision * PIXELS_PER_SUBDIVISION
 
         return (
           <section
             className={`tab-segment${isActive ? ' tab-segment-active' : ''}`}
-            key={rowIndex}
-            aria-label={`Tab timeline ${formatTime(startSeconds)} to ${formatTime(endSeconds)}`}
+            key={measureIndex}
+            aria-label={`Measure ${measureIndex + 1}`}
           >
             <h3 className="tab-segment-heading">
-              {formatTime(startSeconds)} – {formatTime(endSeconds)}
+              Measure {measureIndex + 1} · 4/4 · {bpm} BPM
             </h3>
             <div className="tab-staff">
               <div className="tab-ruler">
-                {ticks.map((second) => (
+                {SUBDIVISION_LABELS.map((label, subdivisionIndex) => (
                   <span
                     className="tab-time-tick"
-                    key={second}
-                    style={{ left: `${LEFT_GUTTER + second * PIXELS_PER_SECOND}px` }}
+                    key={subdivisionIndex}
+                    style={{ left: `${LEFT_GUTTER + subdivisionIndex * PIXELS_PER_SUBDIVISION}px` }}
                   >
-                    {formatTime(startSeconds + second)}
+                    {label}
                   </span>
                 ))}
               </div>
 
               <div className="tab-strings">
-                {isActive && (
+                {isActive && playheadSubdivision >= 0 && playheadSubdivision <= SUBDIVISIONS_PER_MEASURE && (
                   <span
                     className="tab-playhead"
                     style={{ left: `${playheadX}px` }}
-                    aria-label={`Video position ${formatTime(playbackTime)}`}
+                    aria-label={`BPM position measure ${measureIndex + 1}`}
                   />
                 )}
 
@@ -101,11 +102,11 @@ export default function GuitarTabStaff({
                   </div>
                 ))}
 
-                {ticks.map((second) => (
+                {Array.from({ length: SUBDIVISIONS_PER_MEASURE + 1 }, (_, subdivisionIndex) => (
                   <span
-                    className="tab-beat-line"
-                    key={second}
-                    style={{ left: `${LEFT_GUTTER + second * PIXELS_PER_SECOND}px` }}
+                    className={subdivisionIndex % 4 === 0 ? 'tab-beat-line tab-beat-line-major' : 'tab-beat-line'}
+                    key={subdivisionIndex}
+                    style={{ left: `${LEFT_GUTTER + subdivisionIndex * PIXELS_PER_SUBDIVISION}px` }}
                   />
                 ))}
 
@@ -113,16 +114,20 @@ export default function GuitarTabStaff({
                   const stringRow = STRINGS.findIndex((string) => string.number === note.string)
                   if (stringRow < 0) return null
 
+                  const exactSubdivision = secondsToSixteenth(note.start_seconds, bpm)
+                  const snappedSubdivision = Math.round(exactSubdivision)
+                  const positionInMeasure = snappedSubdivision - measureStartSubdivision
+
                   return (
                     <span
                       className="tab-note"
                       key={`${note.midi}-${note.string}-${note.start_seconds}-${index}`}
                       style={{
-                        left: `${LEFT_GUTTER + (note.start_seconds - startSeconds) * PIXELS_PER_SECOND}px`,
+                        left: `${LEFT_GUTTER + positionInMeasure * PIXELS_PER_SUBDIVISION}px`,
                         top: `${stringRow * LANE_HEIGHT + LANE_HEIGHT / 2}px`,
                         opacity: Math.max(0.48, Math.min(1, note.confidence)),
                       }}
-                      title={`${note.pitch}, string ${note.string}, fret ${note.fret}, ${note.start_seconds.toFixed(2)} seconds, confidence ${(note.confidence * 100).toFixed(0)}%`}
+                      title={`${note.pitch}, string ${note.string}, fret ${note.fret}, measure ${measureIndex + 1}, sixteenth ${positionInMeasure + 1}, confidence ${(note.confidence * 100).toFixed(0)}%`}
                     >
                       {note.fret}
                     </span>

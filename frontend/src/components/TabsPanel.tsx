@@ -59,6 +59,7 @@ export default function TabsPanel({
   const [transcription, setTranscription] = useState<TranscriptionResult | null>(null)
   const [transcriptionError, setTranscriptionError] = useState<TranscriptionErrorState | null>(null)
   const [isTranscribing, setIsTranscribing] = useState(false)
+  const [bpm, setBpm] = useState(120)
 
   const transcribeSelectedRange = async () => {
     if (!jobId || endSeconds <= startSeconds) return
@@ -79,7 +80,11 @@ export default function TabsPanel({
       if (!response.ok) {
         throw new Error(result.detail || 'Transcription failed')
       }
-      setTranscription(result as TranscriptionResult)
+      const transcriptionResult = result as TranscriptionResult
+      setTranscription(transcriptionResult)
+      if (transcriptionResult.tempo_bpm) {
+        setBpm(transcriptionResult.tempo_bpm)
+      }
       setTranscriptionError(null)
     } catch (error) {
       setTranscriptionError({
@@ -120,6 +125,24 @@ export default function TabsPanel({
         {isTranscribing ? 'Analyzing...' : 'Analyze selected range'}
       </button>
 
+      <div className="bpm-controls">
+        <label>
+          BPM
+          <input
+            type="number"
+            min={30}
+            max={300}
+            step={1}
+            value={bpm}
+            onChange={(event) => setBpm(Math.max(30, Math.min(300, Number(event.target.value) || 120)))}
+          />
+        </label>
+        <span>
+          {activeTranscription?.tempo_bpm ? `Detected ${activeTranscription.tempo_bpm} BPM · ` : 'No tempo detected · '}
+          4/4 · 16 subdivisions
+        </span>
+      </div>
+
       {activeTranscription ? (
         <>
           <div className="song-details">
@@ -144,6 +167,7 @@ export default function TabsPanel({
               notes={activeTranscription.notes}
               playbackTime={playbackTime}
               durationSeconds={videoDuration}
+              bpm={bpm}
             />
           ) : (
             <div className="tab-card">

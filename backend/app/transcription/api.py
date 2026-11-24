@@ -9,6 +9,7 @@ from app.transcription.models import TranscriptionResult
 from app.transcription.repository import TranscriptionRepository
 from app.transcription.separation import GuitarSeparationService
 from app.transcription.service import TranscriptionError, TranscriptionService
+from app.transcription.tempo import TempoDetectionError, detect_tempo
 from app.transcription.vision import GuitarVisionService
 
 logger = logging.getLogger(__name__)
@@ -83,6 +84,12 @@ def transcribe_job(
     except TranscriptionError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
+    try:
+        tempo_bpm = detect_tempo(audio_for_transcription)
+    except TempoDetectionError:
+        logger.exception("BPM detection failed for range %s-%s", start, end)
+        tempo_bpm = None
+
     for note in notes:
         note["start_seconds"] = round(float(note["start_seconds"]) + start, 3)
 
@@ -91,6 +98,7 @@ def transcribe_job(
         start,
         end,
         notes,
+        bpm=tempo_bpm,
     )
 
     repository.save(
@@ -99,7 +107,7 @@ def transcribe_job(
         end_seconds=end,
         status="ready",
         tuning=STANDARD_TUNING,
-        tempo_bpm=None,
+        tempo_bpm=tempo_bpm,
         notes=notes,
         audio_source=audio_source,
         video_observations=observations,
@@ -109,7 +117,7 @@ def transcribe_job(
         job_id=job_id,
         status="ready",
         tuning=STANDARD_TUNING,
-        tempo_bpm=None,
+        tempo_bpm=tempo_bpm,
         notes=notes,
         audio_source=audio_source,
         start_seconds=start,
