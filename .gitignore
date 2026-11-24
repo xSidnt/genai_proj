@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.uv/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Backend runtime data
+backend/data/
+backend/storage/uploads/
+backend/storage/audio/
+backend/storage/tmp/
+
+# Frontend build and dependencies
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Editor and OS
+.vscode/
+.DS_Store

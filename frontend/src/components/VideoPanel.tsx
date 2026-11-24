@@ -1,8 +1,20 @@
 import { useEffect, useState, type ChangeEvent } from 'react'
 
+interface UploadResult {
+  job_id: string
+  status: string
+  duration_seconds: number
+  width: number | null
+  height: number | null
+  frame_rate: number | null
+  audio_path: string
+}
+
 export default function VideoPanel() {
   const [videoFile, setVideoFile] = useState<File | null>(null)
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
+  const [uploadStatus, setUploadStatus] = useState('No video')
+  const [uploadResult, setUploadResult] = useState<UploadResult | null>(null)
 
   useEffect(() => {
     if (!videoFile) {
@@ -16,9 +28,35 @@ export default function VideoPanel() {
     return () => URL.revokeObjectURL(url)
   }, [videoFile])
 
-  function handleVideoChange(event: ChangeEvent<HTMLInputElement>) {
+  async function handleVideoChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
-    if (file) setVideoFile(file)
+    if (!file) return
+
+    setVideoFile(file)
+    setUploadResult(null)
+    setUploadStatus('Uploading...')
+
+    const formData = new FormData()
+    formData.append('file', file)
+
+    try {
+      const response = await fetch('http://127.0.0.1:8000/api/uploads', {
+        method: 'POST',
+        body: formData,
+      })
+
+      const result = await response.json()
+      if (!response.ok) {
+        throw new Error(result.detail || 'Upload failed')
+      }
+
+      setUploadResult(result as UploadResult)
+      setUploadStatus('Ready')
+    } catch (error) {
+      setUploadStatus('Upload failed')
+      setUploadResult(null)
+      window.alert(error instanceof Error ? error.message : 'Upload failed')
+    }
   }
 
   return (
@@ -28,7 +66,7 @@ export default function VideoPanel() {
           <span className="eyebrow">01 · SOURCE</span>
           <h2>Your video</h2>
         </div>
-        <span className="panel-status">{videoFile ? 'Ready' : 'No video'}</span>
+        <span className="panel-status">{uploadStatus}</span>
       </div>
 
       <div className="video-stage">
@@ -38,7 +76,7 @@ export default function VideoPanel() {
           <div className="video-empty">
             <div className="play-icon">▶</div>
             <strong>Your performance goes here</strong>
-            <span>Upload a 30–60 second guitar video</span>
+            <span>Upload a video under 60 seconds</span>
           </div>
         )}
       </div>
@@ -47,15 +85,22 @@ export default function VideoPanel() {
         {videoFile ? 'Choose another video' : 'Upload a video'}
         <input
           type="file"
-          accept="video/*"
+          accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm"
           onChange={handleVideoChange}
           hidden
         />
       </label>
 
-      <p className="helper-text">
-        MP4, MOV, or WebM. Video processing will be added later.
-      </p>
+      {uploadResult ? (
+        <p className="helper-text">
+          {uploadResult.duration_seconds.toFixed(1)}s · {uploadResult.width ?? '?'}×
+          {uploadResult.height ?? '?'} · {uploadResult.frame_rate?.toFixed(2) ?? '?'} fps
+        </p>
+      ) : (
+        <p className="helper-text">
+          MP4, MOV, or WebM. Maximum length: 60 seconds.
+        </p>
+      )}
     </section>
   )
 }
