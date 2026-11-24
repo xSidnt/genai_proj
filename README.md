@@ -58,6 +58,8 @@ This is a modular monolith:
 - SQLite
 - FFmpeg
 - ffprobe
+- Demucs (`htdemucs_6s` guitar stem)
+- Basic Pitch
 - uv
 
 ## Requirements
@@ -137,7 +139,7 @@ The frontend sends a video using `multipart/form-data`. The endpoint currently p
 2. Stores the original upload under `backend/storage/uploads/<job-id>/`.
 3. Uses ffprobe to determine duration, width, height, and frame rate.
 4. Rejects videos longer than 60 seconds.
-5. Uses FFmpeg to extract the audio and create a WAV file.
+5. Uses FFmpeg to extract stereo 44.1 kHz PCM WAV audio (two channels are retained for source separation).
 6. Stores job metadata and file paths in `backend/data/videos.sqlite3`.
 7. Returns metadata to the frontend.
 
@@ -148,7 +150,7 @@ WAV is an audio file format. It stores sampled audio as waveform data. A WAV fil
 WAV is useful for transcription because it is widely supported and provides a simple, uncompressed representation of sound. The current file is also converted to:
 
 - **PCM 16-bit samples:** stores each audio sample as signed 16-bit data.
-- **Mono:** combines or selects one channel instead of keeping separate left and right channels.
+- **Stereo:** preserves left and right channels because Demucs source separation benefits from the original stereo mix. If the uploaded video is mono, FFmpeg duplicates the mono channel to both sides.
 - **44.1 kHz:** captures 44,100 samples per second.
 
 ### Why FFmpeg is used
@@ -158,27 +160,27 @@ FFmpeg separates the audio from the uploaded video and performs format conversio
 The extraction command used by the backend is conceptually:
 
 ```bash
-ffmpeg -i input.mp4 -vn -ac 1 -ar 44100 -acodec pcm_s16le output.wav
+ffmpeg -i input.mp4 -vn -ac 2 -ar 44100 -acodec pcm_s16le output.wav
 ```
 
 The command means:
 
 - `-i input.mp4`: read the uploaded video.
 - `-vn`: discard video frames; produce audio only.
-- `-ac 1`: convert the audio to mono.
+- `-ac 2`: output two channels for source separation.
 - `-ar 44100`: resample the audio to 44.1 kHz.
 - `-acodec pcm_s16le`: encode uncompressed signed 16-bit PCM audio.
 - `output.wav`: write the extracted audio file.
 
 Metadata is obtained with ffprobe and can include duration, resolution, and frame rate.
 
-### Why mono 44.1 kHz is used
+### Why stereo 44.1 kHz is used
 
-A guitar video may contain stereo audio, but for the initial pitch-transcription version, mono is simpler and usually sufficient because the model must identify pitches from sound rather than preserve a stereo mix.
+A stereo mix retains spatial cues that can help source-separation models. The transcription model can downmix the isolated guitar stem when it analyzes pitch.
 
-44.1 kHz is a common audio format for music and is a useful balance between detail and processing size. A 60-second, mono, 44.1 kHz, 16-bit WAV contains 60 × 44,100 × 2 bytes of waveform data, approximately 5.3 MB for the audio itself.
+44.1 kHz is a common audio format for music and a useful balance between detail and processing size. A 60-second, stereo, 44.1 kHz, 16-bit WAV contains 60 × 44,100 × 2 channels × 2 bytes, approximately 10.6 MB for the audio itself.
 
-Mono and stereo audio can differ in spatial information, such as where a player or instrument appears in a recording. That extra information is not normally needed for note transcription. Stereo separation may be useful later for source separation or more complex recordings.
+The stereo audio is used as input to Demucs. Basic Pitch receives Demucs' isolated guitar stem when available; the current pipeline falls back to the original stereo mix if separation fails.
 
 ## How the frontend understands the upload
 
@@ -230,16 +232,19 @@ That JSON can be rendered in React as tablature and then used as context for the
 
 ### Implemented MVP model: Basic Pitch
 
-Basic Pitch is installed in `backend/.venv` under Python 3.11.
+Basic Pitch and Demucs are installed in `backend/.venv` under Python 3.11.
 The verified macOS dependency set includes `setuptools<81` and `scikit-learn==1.5.1`.
 Python 3.12 failed because the Basic Pitch dependency chain resolves to a TensorFlow macOS wheel that only supports Python 3.11.
+The project also pins `numpy<2` because the selected PyTorch wheel is not compatible with NumPy 2.
 
 The backend provides:
 
 - `POST /api/transcriptions/{job_id}`: generate and save transcription notes.
 - `GET /api/transcriptions/{job_id}`: retrieve a saved transcription.
 
-The service reads the uploaded WAV from SQLite job metadata, calls Basic Pitch, maps each detected MIDI pitch to the first valid position in standard tuning, and stores the resulting JSON in SQLite.
+The service reads the uploaded stereo WAV from SQLite job metadata, runs Demucs `htdemucs_6s` to isolate its `guitar` stem, passes that stem to Basic Pitch, maps each detected MIDI pitch to a standard-tuning string/fret, and stores the resulting JSON in SQLite. If separation fails, it logs the failure and runs Basic Pitch on the original mix. The response's `audio_source` field indicates `demucs_guitar`, `original_fallback`, or `original` for a legacy result.
+
+On first transcription, Demucs downloads its pretrained model weights. Separation currently runs on CPU and can take longer than the clip duration. The model weights are cached outside the repository by the model library; generated `guitar.wav` stems are stored under `backend/storage/audio/<job-id>/`.
 
 ### MVP model choice
 
@@ -253,11 +258,16 @@ Basic Pitch is a suitable baseline because it:
 
 Basic Pitch is a pitch detector, not a complete guitar-to-tab converter. The backend must still:
 
-1. Read the extracted mono 44.1 kHz WAV.
-2. Run Basic Pitch to detect note pitches and time ranges.
-3. Choose a plausible guitar-string and fret position for each pitch.
-4. Measure beats or tempo and group notes into measures.
-5. Return structured JSON for React to render as tabs.
+1. Read the extracted stereo 44.1 kHz WAV.
+2. Run Demucs `htdemucs_6s` and save its `guitar` stem to `backend/storage/audio/<job-id>/guitar.wav`.
+3. Run Basic Pitch on the guitar stem to detect note pitches and time ranges.
+4. Choose a plausible guitar-string and fret position for each pitch.
+5. Measure beats or tempo and group notes into measures.
+6. Return structured JSON for React to render as tabs.
+
+Demucs is a preprocessing step, not a guarantee of clean guitar isolation. Its six-stem model adds guitar and piano stems, and the upstream repository describes guitar quality as usable but subject to bleeding and artifacts. The project currently runs separation on CPU. Demucs' upstream repository is archived, so treat this as an experiment and measure its results on our own clips before making it a production dependency.
+
+An initial three-second excerpt check on one uploaded clip produced 21 Basic Pitch events from the original mix versus 1 event from the Demucs guitar stem (only 4 original events were at confidence ≥0.6). This is a useful smoke-test observation, not an accuracy benchmark: a short segment and one clip are not enough to conclude that Demucs improves all recordings.
 
 ### MVP processing stages
 
@@ -353,7 +363,7 @@ A Gemini-class multimodal model is appropriate for coarse questions such as “d
 ## Alternative approaches to evaluate later
 
 - **Crepe:** useful for monophonic pitch tracking, but less suitable for complete chord detection.
-- **Demucs:** can separate instruments or isolate a guitar in mixed recordings before transcription.
+- **Demucs:** currently integrated as an experimental guitar-stem preprocessing step. The upstream repository is archived; the six-stem model's guitar output can have bleed and artifacts, so compare on an evaluation set before relying on it.
 - **A specialized transcription model:** suitable when Basic Pitch accuracy is insufficient for a specific guitar style.
 - **A commercial transcription API:** faster to prototype with but should be isolated behind a backend adapter so it can be replaced.
 

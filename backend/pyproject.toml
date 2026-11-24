@@ -9,6 +9,8 @@ dependencies = [
   "basic-pitch[onnx]>=0.4.0",
   "setuptools<81",
   "scikit-learn==1.5.1",
+  "demucs>=4.1.0",
+  "numpy<2",
 ]
 
 [tool.uv]

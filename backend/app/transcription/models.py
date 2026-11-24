@@ -17,3 +17,4 @@ class TranscriptionResult(BaseModel):
     tuning: list[str]
     tempo_bpm: int | None
     notes: list[TabNote]
+    audio_source: str

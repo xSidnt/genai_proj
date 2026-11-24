@@ -17,6 +17,7 @@ interface TranscriptionResult {
   tuning: string[]
   tempo_bpm: number | null
   notes: TabNote[]
+  audio_source: string
 }
 
 interface TranscriptionErrorState {
@@ -96,6 +97,13 @@ export default function TabsPanel({ jobId, playbackTime, videoDuration }: TabsPa
             <div>
               <strong>Detected notes</strong>
               <span>Tuning · {activeTranscription.tuning.join('  ')}</span>
+              <span>
+                Source · {activeTranscription.audio_source === 'demucs_guitar'
+                  ? 'Demucs guitar stem'
+                  : activeTranscription.audio_source === 'original_fallback'
+                    ? 'Original audio (Demucs fallback)'
+                    : 'Original audio (legacy result)'}
+              </span>
             </div>
             <span className="tempo">{activeTranscription.notes.length} notes</span>
           </div>

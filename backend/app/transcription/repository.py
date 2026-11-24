@@ -21,10 +21,20 @@ class TranscriptionRepository:
                     status TEXT NOT NULL,
                     tuning TEXT NOT NULL,
                     tempo_bpm INTEGER,
-                    notes_json TEXT NOT NULL
+                    notes_json TEXT NOT NULL,
+                    audio_source TEXT NOT NULL DEFAULT 'original'
                 )
                 """
             )
+            columns = {
+                row[1]
+                for row in connection.execute("PRAGMA table_info(transcription_results)")
+            }
+            if "audio_source" not in columns:
+                connection.execute(
+                    "ALTER TABLE transcription_results "
+                    "ADD COLUMN audio_source TEXT NOT NULL DEFAULT 'original'"
+                )
 
     def get_upload_audio_path(self, job_id: str) -> str | None:
         with self._connect() as connection:
@@ -42,27 +52,36 @@ class TranscriptionRepository:
         tuning: list[str],
         tempo_bpm: int | None,
         notes: list[dict],
+        audio_source: str,
     ) -> None:
         with self._connect() as connection:
             connection.execute(
                 """
                 INSERT INTO transcription_results
-                (job_id, status, tuning, tempo_bpm, notes_json)
-                VALUES (?, ?, ?, ?, ?)
+                (job_id, status, tuning, tempo_bpm, notes_json, audio_source)
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(job_id) DO UPDATE SET
                     status = excluded.status,
                     tuning = excluded.tuning,
                     tempo_bpm = excluded.tempo_bpm,
-                    notes_json = excluded.notes_json
+                    notes_json = excluded.notes_json,
+                    audio_source = excluded.audio_source
                 """,
-                (job_id, status, json.dumps(tuning), tempo_bpm, json.dumps(notes)),
+                (
+                    job_id,
+                    status,
+                    json.dumps(tuning),
+                    tempo_bpm,
+                    json.dumps(notes),
+                    audio_source,
+                ),
             )
 
     def get(self, job_id: str) -> dict | None:
         with self._connect() as connection:
             row = connection.execute(
                 """
-                SELECT status, tuning, tempo_bpm, notes_json
+                SELECT status, tuning, tempo_bpm, notes_json, audio_source
                 FROM transcription_results WHERE job_id = ?
                 """,
                 (job_id,),
@@ -76,4 +95,5 @@ class TranscriptionRepository:
             "tuning": json.loads(row[1]),
             "tempo_bpm": row[2],
             "notes": json.loads(row[3]),
+            "audio_source": row[4],
         }
