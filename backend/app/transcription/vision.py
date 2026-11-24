@@ -6,6 +6,7 @@ import numpy as np
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision as mp_vision
 
+from app.transcription.gemini_vision import GeminiVisionService
 from app.transcription.jev_vision import JevVisionService
 
 
@@ -49,6 +50,7 @@ class GuitarVisionService:
                 **observation,
             })
 
+        gemini = GeminiVisionService()
         jev = JevVisionService()
         subdivision_seconds = 60 / (bpm or 120) / 4
         subdivision_cache: dict[tuple[int, int], tuple[np.ndarray | None, dict]] = {}
@@ -61,10 +63,12 @@ class GuitarVisionService:
             if cache_key not in subdivision_cache:
                 subdivision_timestamp = start_seconds + subdivision * subdivision_seconds
                 frame = self._read_frame(capture, subdivision_timestamp, fps)
-                jev_result = jev.infer_position(frame, midi)
-                subdivision_cache[cache_key] = (frame, jev_result)
+                vision_result = gemini.infer_position(frame, midi)
+                if vision_result["visual_status"] in {"unavailable", "gemini-uncertain"}:
+                    vision_result = jev.infer_position(frame, midi)
+                subdivision_cache[cache_key] = (frame, vision_result)
             else:
-                frame, jev_result = subdivision_cache[cache_key]
+                frame, vision_result = subdivision_cache[cache_key]
 
             observation = self._observe_frame(frame, landmarker) if frame is not None else {
                 "hands_visible": 0,
@@ -75,7 +79,7 @@ class GuitarVisionService:
 
             visual_confidence = max(
                 float(observation["visual_confidence"]),
-                float(jev_result["visual_confidence"]),
+                float(vision_result["visual_confidence"]),
             )
             combined_confidence = min(
                 1.0,
@@ -83,7 +87,7 @@ class GuitarVisionService:
                 * (0.55 + 0.45 * visual_confidence),
             )
 
-            visual_status = jev_result["visual_status"]
+            visual_status = vision_result["visual_status"]
             if visual_status == "unavailable":
                 visual_status = "hand-visible" if observation["hands_visible"] > 0 else "hand-not-visible"
 
@@ -92,16 +96,18 @@ class GuitarVisionService:
                 visual_status=visual_status,
                 visual_confidence=round(visual_confidence, 3),
                 combined_confidence=round(combined_confidence, 3),
-                visual_string=jev_result["visual_string"],
-                visual_fret=jev_result["visual_fret"],
-                jev_answer=jev_result["jev_answer"],
-                jev_probabilities=jev_result["jev_probabilities"],
-                answer_mass=jev_result["answer_mass"],
+                visual_string=vision_result["visual_string"],
+                visual_fret=vision_result["visual_fret"],
+                finger=vision_result.get("finger", "unknown"),
+                gemini_answer=vision_result.get("gemini_answer"),
+                jev_answer=vision_result.get("jev_answer"),
+                jev_probabilities=vision_result.get("jev_probabilities", {}),
+                answer_mass=vision_result.get("answer_mass", 0.0),
             )
 
-            if jev_result["visual_string"] is not None:
-                enhanced_note["string"] = int(jev_result["visual_string"])
-                enhanced_note["fret"] = int(jev_result["visual_fret"])
+            if vision_result["visual_string"] is not None:
+                enhanced_note["string"] = int(vision_result["visual_string"])
+                enhanced_note["fret"] = int(vision_result["visual_fret"])
 
             enhanced_notes.append(enhanced_note)
 

@@ -2,6 +2,7 @@ import logging
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException, Query
 
 from app.transcription.media import MediaTrimError, trim_audio
@@ -11,6 +12,8 @@ from app.transcription.separation import GuitarSeparationService
 from app.transcription.service import TranscriptionError, TranscriptionService
 from app.transcription.tempo import TempoDetectionError, detect_tempo
 from app.transcription.vision import GuitarVisionService
+
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/transcriptions", tags=["transcriptions"])
@@ -46,10 +49,12 @@ def transcribe_job(
         raise HTTPException(status_code=422, detail="Analysis range must be at least 0.5 seconds")
 
     existing = repository.get(job_id, start, end)
+    gemini_enabled = bool(os.getenv("GEMINI_API_KEY"))
     jev_enabled = os.getenv("JEV_VISION_ENABLED", "true").lower() not in {"0", "false", "no"}
     if existing:
-        has_jev_metadata = bool(existing["notes"]) and all("jev_answer" in note for note in existing["notes"])
-        if not jev_enabled or has_jev_metadata:
+        notes = existing["notes"]
+        has_vision_metadata = bool(notes) and all("gemini_answer" in note or "jev_answer" in note for note in notes)
+        if (not gemini_enabled and not jev_enabled) or (gemini_enabled and has_vision_metadata) or (not gemini_enabled and jev_enabled and has_vision_metadata):
             return TranscriptionResult(
                 job_id=job_id,
                 start_seconds=start,

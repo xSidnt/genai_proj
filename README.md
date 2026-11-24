@@ -415,3 +415,5 @@ Jev-Vision is optional and lazy-loaded on Apple Silicon through MPS. Set `JEV_VI
 The vision pass reports hand visibility, fretting-hand plausibility, neck-edge visibility, and visual confidence. Exact fret/string accuracy still requires real labeled guitar-frame evaluation and is not guaranteed by a general VQA-style checkpoint.
 
 Results are cached by `(job_id, start_seconds, end_seconds)` in SQLite. The original video and extracted WAV remain stored for frame analysis and evaluation.
+
+Gemini cloud vision is optional and activates when `GEMINI_API_KEY` is set in `backend/.env`. Copy `backend/.env.example`, add the key, and optionally set `GEMINI_MODEL` (default: `gemini-2.5-flash-lite`). Gemini receives a frame, detected MIDI pitch, and pitch-compatible string/fret candidates; it returns strict JSON including optional finger identity and confidence. If no key is configured or Gemini fails, MediaPipe/Jev remain as fallbacks.

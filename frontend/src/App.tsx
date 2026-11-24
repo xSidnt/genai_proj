@@ -14,9 +14,9 @@ function App() {
   return (
     <main className="app-shell">
       <header className="topbar">
-        <a className="brand" href="/" aria-label="Riffroom home">
-          <span className="brand-mark">♪</span>
-          <span>riffroom</span>
+        <a className="brand" href="/" aria-label="croissantdough home">
+          <span className="brand-mark" aria-hidden="true">🥐</span>
+          <span>croissantdough</span>
         </a>
 
         <div className="topbar-center">Guitar transcription workspace</div>
@@ -29,7 +29,7 @@ function App() {
       <section className="welcome">
         <div>
           <span className="eyebrow">YOUR AI PRACTICE SPACE</span>
-          <h1>Turn a riff into a song.</h1>
+          <h1>Generate tabs from any video.</h1>
           <p>Upload a performance, explore the tabs, and ask questions as you learn.</p>
         </div>
         <div className="step-indicator">
