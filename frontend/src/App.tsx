@@ -1,9 +1,12 @@
+import { useState } from 'react'
 import VideoPanel from './components/VideoPanel'
 import TabsPanel from './components/TabsPanel'
 import ChatPanel from './components/ChatPanel'
 import './App.css'
 
 function App() {
+  const [jobId, setJobId] = useState<string | null>(null)
+
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -32,8 +35,8 @@ function App() {
       </section>
 
       <div className="workspace">
-        <VideoPanel />
-        <TabsPanel />
+        <VideoPanel setJobId={setJobId} />
+        <TabsPanel jobId={jobId} />
         <ChatPanel />
       </div>
 

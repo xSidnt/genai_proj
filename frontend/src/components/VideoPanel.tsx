@@ -10,7 +10,11 @@ interface UploadResult {
   audio_path: string
 }
 
-export default function VideoPanel() {
+interface VideoPanelProps {
+  setJobId: (jobId: string) => void
+}
+
+export default function VideoPanel({ setJobId }: VideoPanelProps) {
   const [videoFile, setVideoFile] = useState<File | null>(null)
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [uploadStatus, setUploadStatus] = useState('No video')
@@ -52,6 +56,7 @@ export default function VideoPanel() {
 
       setUploadResult(result as UploadResult)
       setUploadStatus('Ready')
+      setJobId((result as UploadResult).job_id)
     } catch (error) {
       setUploadStatus('Upload failed')
       setUploadResult(null)

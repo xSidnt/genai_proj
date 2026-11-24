@@ -37,10 +37,7 @@ This is a modular monolith:
 
 - The frontend and backend are separate applications inside one repository.
 - Backend features own their API route, business logic, data models, and persistence access.
-- Runtime files such as videos, WAV files, databases, and temporary files are outside feature source code.
-- Features can later be moved into microservices because each feature is grouped and has its own service and repository boundaries.
-
-Do not commit uploaded media, generated audio, databases, virtual environments, environment variables, or secrets.
+- Runtime files such as videos, WAV files, databases, virtual environments, environment variables, or secrets.
 
 ## Tech stack
 
@@ -66,7 +63,7 @@ Do not commit uploaded media, generated audio, databases, virtual environments, 
 ## Requirements
 
 - Node.js and npm
-- Python 3.11+
+- Python 3.11 (required for the current macOS Basic Pitch dependencies)
 - FFmpeg and ffprobe
 - uv
 
@@ -98,6 +95,8 @@ npm run lint
 
 ```bash
 cd backend
+uv python install 3.11
+uv venv --python 3.11 --clear .venv
 uv sync
 .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
@@ -108,6 +107,18 @@ Check API health:
 
 ```bash
 curl http://127.0.0.1:8000/api/health
+```
+
+Create a transcription for an uploaded job:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/transcriptions/JOB_ID
+```
+
+Retrieve an existing transcription:
+
+```bash
+curl http://127.0.0.1:8000/api/transcriptions/JOB_ID
 ```
 
 ## Current upload behavior
@@ -215,15 +226,98 @@ The website will understand tab information only after the backend converts audi
 
 That JSON can be rendered in React as tablature and then used as context for the AI chat feature.
 
-## Future processing stages
+## Transcription strategy
 
-The upload stage is not transcription yet. Planned stages are:
+### Implemented MVP model: Basic Pitch
+
+Basic Pitch is installed in `backend/.venv` under Python 3.11.
+The verified macOS dependency set includes `setuptools<81` and `scikit-learn==1.5.1`.
+Python 3.12 failed because the Basic Pitch dependency chain resolves to a TensorFlow macOS wheel that only supports Python 3.11.
+
+The backend provides:
+
+- `POST /api/transcriptions/{job_id}`: generate and save transcription notes.
+- `GET /api/transcriptions/{job_id}`: retrieve a saved transcription.
+
+The service reads the uploaded WAV from SQLite job metadata, calls Basic Pitch, maps each detected MIDI pitch to the first valid position in standard tuning, and stores the resulting JSON in SQLite.
+
+### MVP model choice
+
+Basic Pitch is a suitable baseline because it:
+
+- Accepts an audio file or waveform and detects notes and timing.
+- Returns MIDI-like note events and confidence values.
+- Supports polyphonic music, including chords.
+- Runs locally, avoiding a transcription API dependency during development.
+- Produces a useful baseline for short, clean guitar recordings.
+
+Basic Pitch is a pitch detector, not a complete guitar-to-tab converter. The backend must still:
+
+1. Read the extracted mono 44.1 kHz WAV.
+2. Run Basic Pitch to detect note pitches and time ranges.
+3. Choose a plausible guitar-string and fret position for each pitch.
+4. Measure beats or tempo and group notes into measures.
+5. Return structured JSON for React to render as tabs.
+
+### MVP processing stages
+
+The processing pipeline is:
 
 1. `upload`: validate and store the video.
-2. `media`: extract and normalize audio.
-3. `transcription`: detect pitches and note timing.
+2. `media`: extract and normalize the audio.
+3. `transcription`: detect pitches and note timing with Basic Pitch.
 4. `tab-generation`: map pitches to guitar strings and frets.
 5. `chat`: answer questions using the source video, transcript, and generated tabs.
+
+### Suggested transcription result
+
+Basic Pitch can be converted into an application-owned format rather than passed directly to React:
+
+```json
+{
+  "job_id": "unique-job-id",
+  "status": "ready",
+  "tuning": ["E2", "A2", "D3", "G3", "B3", "E4"],
+  "tempo_bpm": null,
+  "notes": [
+    {
+      "pitch": "E2",
+      "midi": 40,
+      "string": 6,
+      "fret": 0,
+      "start_seconds": 0.25,
+      "duration_seconds": 0.50,
+      "confidence": 0.92
+    }
+  ]
+}
+```
+
+The backend owns pitch detection and tab mapping. The frontend receives JSON and only renders it.
+
+### MVP limitations
+
+Basic Pitch is a starting point, not a guaranteed transcription engine.
+
+Expected limitations include:
+
+- Chords and fast passages may be detected imprecisely.
+- A pitch alone can correspond to multiple fret positions.
+- Timing estimates can drift without a clear beat or metronome.
+- String selection may need playability scoring rather than one fixed rule.
+- Finger noise, room noise, effects, and poor lighting can reduce quality.
+- Notes played outside standard tuning require tuning detection or user input.
+
+The transcription endpoint should use an asynchronous job. Processing should not block the upload request because audio models are slower than FFmpeg extraction.
+
+## Alternative approaches to evaluate later
+
+- **Crepe:** useful for monophonic pitch tracking, but less suitable for complete chord detection.
+- **Demucs:** can separate instruments or isolate a guitar in mixed recordings before transcription.
+- **A specialized transcription model:** suitable when Basic Pitch accuracy is insufficient for a specific guitar style.
+- **A commercial transcription API:** faster to prototype with but should be isolated behind a backend adapter so it can be replaced.
+
+Do not use Docling for transcription. Docling processes documents; it does not convert guitar audio to notes.
 
 ## API notes
 
