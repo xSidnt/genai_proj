@@ -8,6 +8,8 @@ function App() {
   const [jobId, setJobId] = useState<string | null>(null)
   const [videoDuration, setVideoDuration] = useState(0)
   const [playbackTime, setPlaybackTime] = useState(0)
+  const [startSeconds, setStartSeconds] = useState(0)
+  const [endSeconds, setEndSeconds] = useState(0)
 
   return (
     <main className="app-shell">
@@ -39,13 +41,28 @@ function App() {
       <div className="workspace">
         <VideoPanel
           onPlaybackTimeChange={setPlaybackTime}
+          startSeconds={startSeconds}
+          endSeconds={endSeconds}
+          onRangeChange={(start, end) => {
+            setStartSeconds(start)
+            setEndSeconds(end)
+            setPlaybackTime(start)
+          }}
           setUploadInfo={(nextJobId, duration) => {
             setJobId(nextJobId)
             setVideoDuration(duration)
             setPlaybackTime(0)
+            setStartSeconds(0)
+            setEndSeconds(duration)
           }}
         />
-        <TabsPanel jobId={jobId} playbackTime={playbackTime} videoDuration={videoDuration} />
+        <TabsPanel
+          jobId={jobId}
+          playbackTime={playbackTime}
+          videoDuration={videoDuration}
+          startSeconds={startSeconds}
+          endSeconds={endSeconds}
+        />
         <ChatPanel />
       </div>
 

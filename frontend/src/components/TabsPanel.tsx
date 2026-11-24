@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import GuitarTabStaff from './GuitarTabStaff'
 
 interface TabNote {
@@ -9,6 +9,19 @@ interface TabNote {
   start_seconds: number
   duration_seconds: number
   confidence: number
+  visual_status?: string
+  visual_confidence?: number
+  combined_confidence?: number
+  visual_string?: number
+  visual_fret?: number
+}
+
+interface VideoObservation {
+  timestamp_seconds: number
+  hands_visible: number
+  fretting_hand_visible: boolean
+  neck_visible: boolean
+  visual_confidence: number
 }
 
 interface TranscriptionResult {
@@ -18,6 +31,9 @@ interface TranscriptionResult {
   tempo_bpm: number | null
   notes: TabNote[]
   audio_source: string
+  start_seconds: number
+  end_seconds: number
+  video_observations: VideoObservation[]
 }
 
 interface TranscriptionErrorState {
@@ -29,47 +45,51 @@ interface TabsPanelProps {
   jobId: string | null
   playbackTime: number
   videoDuration: number
+  startSeconds: number
+  endSeconds: number
 }
 
-export default function TabsPanel({ jobId, playbackTime, videoDuration }: TabsPanelProps) {
+export default function TabsPanel({
+  jobId,
+  playbackTime,
+  videoDuration,
+  startSeconds,
+  endSeconds,
+}: TabsPanelProps) {
   const [transcription, setTranscription] = useState<TranscriptionResult | null>(null)
   const [transcriptionError, setTranscriptionError] = useState<TranscriptionErrorState | null>(null)
+  const [isTranscribing, setIsTranscribing] = useState(false)
 
-  useEffect(() => {
-    if (!jobId) return
+  const transcribeSelectedRange = async () => {
+    if (!jobId || endSeconds <= startSeconds) return
     const activeJobId = jobId
+    setIsTranscribing(true)
+    setTranscriptionError(null)
 
-    let cancelled = false
-
-    async function transcribe() {
-      try {
-        const response = await fetch(
-          `http://127.0.0.1:8000/api/transcriptions/${activeJobId}`,
-          { method: 'POST' },
-        )
-        const result = await response.json()
-        if (!response.ok) {
-          throw new Error(result.detail || 'Transcription failed')
-        }
-        if (!cancelled) {
-          setTranscription(result as TranscriptionResult)
-          setTranscriptionError(null)
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setTranscriptionError({
-            jobId: activeJobId,
-            message: error instanceof Error ? error.message : 'Transcription failed',
-          })
-        }
+    try {
+      const params = new URLSearchParams({
+        start_seconds: startSeconds.toFixed(3),
+        end_seconds: endSeconds.toFixed(3),
+      })
+      const response = await fetch(
+        `http://127.0.0.1:8000/api/transcriptions/${activeJobId}?${params}`,
+        { method: 'POST' },
+      )
+      const result = await response.json()
+      if (!response.ok) {
+        throw new Error(result.detail || 'Transcription failed')
       }
+      setTranscription(result as TranscriptionResult)
+      setTranscriptionError(null)
+    } catch (error) {
+      setTranscriptionError({
+        jobId: activeJobId,
+        message: error instanceof Error ? error.message : 'Transcription failed',
+      })
+    } finally {
+      setIsTranscribing(false)
     }
-
-    void transcribe()
-    return () => {
-      cancelled = true
-    }
-  }, [jobId])
+  }
 
   const activeTranscription = transcription?.job_id === jobId ? transcription : null
   const activeError = transcriptionError?.jobId === jobId ? transcriptionError : null
@@ -91,12 +111,23 @@ export default function TabsPanel({ jobId, playbackTime, videoDuration }: TabsPa
         <span className="panel-status">{status}</span>
       </div>
 
+      <button
+        className="button button-primary analyze-button"
+        type="button"
+        disabled={!jobId || isTranscribing || endSeconds <= startSeconds}
+        onClick={() => void transcribeSelectedRange()}
+      >
+        {isTranscribing ? 'Analyzing...' : 'Analyze selected range'}
+      </button>
+
       {activeTranscription ? (
         <>
           <div className="song-details">
             <div>
               <strong>Detected notes</strong>
               <span>Tuning · {activeTranscription.tuning.join('  ')}</span>
+              <span>Range · {activeTranscription.start_seconds.toFixed(1)}s–{activeTranscription.end_seconds.toFixed(1)}s</span>
+              <span>Vision · {activeTranscription.video_observations.filter((item) => item.hands_visible > 0).length} hand-visible frames</span>
               <span>
                 Source · {activeTranscription.audio_source === 'demucs_guitar'
                   ? 'Demucs guitar stem'

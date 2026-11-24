@@ -13,9 +13,18 @@ interface UploadResult {
 interface VideoPanelProps {
   setUploadInfo: (jobId: string, durationSeconds: number) => void
   onPlaybackTimeChange: (seconds: number) => void
+  startSeconds: number
+  endSeconds: number
+  onRangeChange: (startSeconds: number, endSeconds: number) => void
 }
 
-export default function VideoPanel({ setUploadInfo, onPlaybackTimeChange }: VideoPanelProps) {
+export default function VideoPanel({
+  setUploadInfo,
+  onPlaybackTimeChange,
+  startSeconds,
+  endSeconds,
+  onRangeChange,
+}: VideoPanelProps) {
   const [videoFile, setVideoFile] = useState<File | null>(null)
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [uploadStatus, setUploadStatus] = useState('No video')
@@ -60,6 +69,7 @@ export default function VideoPanel({ setUploadInfo, onPlaybackTimeChange }: Vide
         (result as UploadResult).job_id,
         (result as UploadResult).duration_seconds,
       )
+      onRangeChange(0, (result as UploadResult).duration_seconds)
     } catch (error) {
       setUploadStatus('Upload failed')
       setUploadResult(null)
@@ -106,10 +116,49 @@ export default function VideoPanel({ setUploadInfo, onPlaybackTimeChange }: Vide
       </label>
 
       {uploadResult ? (
-        <p className="helper-text">
-          {uploadResult.duration_seconds.toFixed(1)}s · {uploadResult.width ?? '?'}×
-          {uploadResult.height ?? '?'} · {uploadResult.frame_rate?.toFixed(2) ?? '?'} fps
-        </p>
+        <>
+          <div className="analysis-range">
+            <div className="analysis-range-heading">
+              <strong>Analysis range</strong>
+              <span>{(endSeconds - startSeconds).toFixed(1)}s selected</span>
+            </div>
+            <div className="analysis-range-fields">
+              <label>
+                Start
+                <input
+                  type="number"
+                  min={0}
+                  max={Math.max(0, endSeconds - 0.5)}
+                  step={0.1}
+                  value={startSeconds}
+                  onChange={(event) => {
+                    const nextStart = Math.max(0, Math.min(Number(event.target.value), endSeconds - 0.5))
+                    onRangeChange(nextStart, endSeconds)
+                  }}
+                />
+              </label>
+              <label>
+                End
+                <input
+                  type="number"
+                  min={Math.min(uploadResult.duration_seconds, startSeconds + 0.5)}
+                  max={uploadResult.duration_seconds}
+                  step={0.1}
+                  value={endSeconds}
+                  onChange={(event) => {
+                    const nextEnd = Math.min(uploadResult.duration_seconds, Math.max(startSeconds + 0.5, Number(event.target.value)))
+                    onRangeChange(startSeconds, nextEnd)
+                  }}
+                />
+              </label>
+            </div>
+          </div>
+
+          <p className="helper-text">
+            {uploadResult.duration_seconds.toFixed(1)}s · {uploadResult.width ?? '?'}×
+            {uploadResult.height ?? '?'} · {uploadResult.frame_rate?.toFixed(2) ?? '?'} fps
+          </p>
+        </>
       ) : (
         <p className="helper-text">
           MP4, MOV, or WebM. Maximum length: 60 seconds.

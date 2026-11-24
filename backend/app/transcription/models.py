@@ -9,6 +9,19 @@ class TabNote(BaseModel):
     start_seconds: float
     duration_seconds: float
     confidence: float
+    visual_status: str | None = None
+    visual_confidence: float | None = None
+    combined_confidence: float | None = None
+    visual_string: int | None = None
+    visual_fret: int | None = None
+
+
+class VideoObservation(BaseModel):
+    timestamp_seconds: float
+    hands_visible: int
+    fretting_hand_visible: bool
+    neck_visible: bool
+    visual_confidence: float
 
 
 class TranscriptionResult(BaseModel):
@@ -18,3 +31,6 @@ class TranscriptionResult(BaseModel):
     tempo_bpm: int | None
     notes: list[TabNote]
     audio_source: str
+    start_seconds: float = 0.0
+    end_seconds: float = 0.0
+    video_observations: list[VideoObservation] = []

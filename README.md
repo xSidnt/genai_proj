@@ -334,6 +334,8 @@ The transcription endpoint should use an asynchronous job. Processing should not
 
 In the first real-video check, Basic Pitch returned many notes during the opening seconds when the visible guitarist was not yet playing (there may be background guitar/audio). The current implementation displays all detections and does not identify which audible instrument belongs to the visible performer. This is expected to be a model/source-selection limitation, not a tablature-rendering issue.
 
+The current tab output is not expected to match the performance reliably yet. Basic Pitch detects pitches from the complete audio mix; the current tab mapper then independently chooses the lowest-fret standard-tuning position for each pitch. It does not use the player's visible hand position, and the current renderer has no beat quantization. It can therefore show background notes, choose a different valid string/fret than the performer used, or place notes at imprecise times.
+
 Recommended next steps, in order:
 
 1. Keep the raw model output for debugging, but add an adjustable confidence threshold and test stricter Basic Pitch onset/frame thresholds against real guitar clips. Do not assume thresholding alone identifies the foreground guitarist.
@@ -348,11 +350,25 @@ A vision model can complement audio transcription, but a general video/vision-la
 
 Recommended hybrid design:
 
-1. Preserve timestamps while decoding the video. Sample a coarse pass around 2 frames/second to locate visible playing regions and check whether the fretboard is in view. This is for activity windows, not note transcription.
-2. Use the audio model to detect note pitches, onset times, durations, and chord groups.
-3. For each audio onset/chord, inspect one or more nearby high-resolution video frames (for example, around onset minus 100 ms, onset, and onset plus 100 ms). Event-based sampling is more useful than asking about every fixed 0.5-second interval, which can miss fast note changes or spend work where no note was detected.
-4. If the neck is clear enough, use a specialized fretboard/hand detector and camera geometry to estimate candidate string/fret positions. Use the audio pitch and guitar tuning to constrain which positions are musically possible.
-5. Combine the audio pitch, candidate visual fingering, and continuity/playability into a confidence score. Keep uncertain notes reviewable and let the user correct them.
+1. Preserve audio/video timestamps when decoding. A coarse video pass (for example, a few frames per second) finds likely playing regions, checks that the neck and hands are visible, and lets the user exclude intros or background-only parts.
+2. Run source separation and audio transcription only on the chosen region. Audio provides note pitches, onset times, durations, and possible chord groups.
+3. For each audio note/chord onset, inspect nearby source frames at the original frame resolution. A fixed frame every 0.5 seconds is useful for coarse activity but can miss fast notes; use audio event timestamps to trigger the detailed visual check.
+4. Detect the guitar neck, string lines, fret boundaries, and fretting-hand/fingertip landmarks. Calibrate/project the fretboard geometry into image coordinates, then estimate which string/fret each fingertip presses. Use audio pitch plus tuning to rule out visually plausible but acoustically impossible candidates.
+5. Track candidates across time, preferring a coherent hand position and plausible transitions. Return visual, audio, and combined confidence separately; retain low-confidence notes for user review/correction.
+
+Possible implementation pieces include an object detector for guitar/neck regions, a hand-landmark model for finger locations, and OpenCV geometry for strings/fret boundaries. A general multimodal vision model can help with coarse activity or visibility judgments, but exact fretboard localization should be evaluated with a purpose-built CV pipeline. Camera angle, motion blur, low resolution, and fingers covering strings can make exact detection impossible for some clips.
+
+Detecting **which finger** (index/middle/ring/pinky) is pressing is possible only when the hand is large and clear enough, and is harder than detecting the string/fret. Finger identity is not required to write a tab; it is an optional later feature for fingering suggestions. Do not invent a finger label when the image is occluded—return unknown/low confidence.
+
+Jev is not part of pixel/frame analysis. A vision pipeline would first turn frames into structured observations (for example, candidate fret positions, hand visibility, and confidence). Jev could then classify or score those text/structured candidates against a predefined schema, if evaluation shows it helps. It cannot itself find notes, strings, frets, or fingers from a video frame.
+
+### Recommended milestones
+
+1. **Make audio events trustworthy:** compare the original mix and Demucs guitar stem, add a user-selectable analysis range and confidence controls, and evaluate against a few labeled clips.
+2. **Add video-assisted region selection:** show coarse “playing likely / uncertain” time ranges and let the user confirm the region before transcription.
+3. **Prototype visual fretboard localization:** start with a short, close, well-lit clip; detect the neck/strings/frets and hand landmarks; overlay candidate positions for manual verification.
+4. **Fuse candidates:** match detected audio pitches to feasible visible string/fret positions, with continuity and confidence, and allow correction.
+5. **Add finger guidance only after fret/string accuracy is measured.**
 
 Example outputs for a vision pass could include `playing_visible`, `fretting_hand_visible`, `picking_hand_active`, `neck_visible`, and a confidence score, all tied to a video timestamp. A later Jev call could classify a structured text representation of these signals or rank a finite set of already-generated candidates. Jev cannot receive the image pixels itself.
 
@@ -379,3 +395,20 @@ Do not use Docling for transcription. Docling processes documents; it does not c
 ## Tablature workspace and playback
 
 The tablature panel takes roughly 55% of the desktop workspace; the video and chat panels retain narrower columns. The tab staff is divided into compact eight-second timeline rows rather than one long horizontal strip. Each row has its own time ruler, and the red playhead appears in the row matching the video's current playback/seek position. Scroll vertically for additional rows; horizontal scrolling remains available at narrower widths. These are time windows, not musical measures, because tempo and beat quantization are not implemented yet.
+
+## Implemented multimodal analysis workflow
+
+The current application supports an explicit analysis range:
+
+1. Upload a video and select a start/end section in the source panel.
+2. Click **Analyze selected range**.
+3. FFmpeg trims the extracted stereo audio to that range.
+4. Demucs can separate a guitar stem, with fallback to the trimmed original audio.
+5. Basic Pitch detects notes in the trimmed segment.
+6. Detected timestamps are offset back onto the full-video timeline.
+7. MediaPipe analyzes frames near note onsets and coarse frames every 0.5 seconds.
+8. The API returns audio, visual, and combined confidence fields plus coarse hand/neck observations.
+
+The vision pass reports hand visibility, fretting-hand plausibility, neck-edge visibility, and visual confidence. It does not claim exact string/fret detection until a calibrated fretboard detector is available.
+
+Results are cached by `(job_id, start_seconds, end_seconds)` in SQLite. The original video and extracted WAV remain stored for frame analysis and evaluation.
