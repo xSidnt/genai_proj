@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 
 import cv2
 import mediapipe as mp
@@ -7,6 +8,7 @@ from mediapipe.tasks import python
 from mediapipe.tasks.python import vision as mp_vision
 
 from app.transcription.gemini_vision import GeminiVisionService
+from app.transcription.openai_vision import OpenAIVisionService
 from app.transcription.jev_vision import JevVisionService
 
 
@@ -50,8 +52,10 @@ class GuitarVisionService:
                 **observation,
             })
 
-        gemini = GeminiVisionService()
-        jev = JevVisionService()
+        provider = os.getenv("VISION_PROVIDER", "gemini").strip().lower()
+        gemini = GeminiVisionService() if provider == "gemini" else None
+        openai = OpenAIVisionService() if provider == "openai" else None
+        jev = JevVisionService() if provider == "jev" or provider == "local" else None
         subdivision_seconds = 60 / (bpm or 120) / 4
         subdivision_cache: dict[tuple[int, int], tuple[np.ndarray | None, dict]] = {}
         enhanced_notes = []
@@ -63,9 +67,31 @@ class GuitarVisionService:
             if cache_key not in subdivision_cache:
                 subdivision_timestamp = start_seconds + subdivision * subdivision_seconds
                 frame = self._read_frame(capture, subdivision_timestamp, fps)
-                vision_result = gemini.infer_position(frame, midi)
-                if vision_result["visual_status"] in {"unavailable", "gemini-uncertain"}:
+
+                if provider == "gemini" and gemini is not None:
+                    vision_result = gemini.infer_position(frame, midi)
+                    if vision_result["visual_status"] in {"unavailable", "gemini-uncertain"}:
+                        vision_result = JevVisionService().infer_position(frame, midi)
+                elif provider == "openai" and openai is not None:
+                    vision_result = openai.infer_position(frame, midi)
+                    if vision_result["visual_status"] in {"unavailable", "openai-uncertain"}:
+                        vision_result = JevVisionService().infer_position(frame, midi)
+                elif jev is not None:
                     vision_result = jev.infer_position(frame, midi)
+                else:
+                    vision_result = {
+                        "visual_status": "unavailable",
+                        "visual_confidence": 0.0,
+                        "visual_string": None,
+                        "visual_fret": None,
+                        "finger": "unknown",
+                        "gemini_answer": None,
+                        "openai_answer": None,
+                        "jev_answer": None,
+                        "jev_probabilities": {},
+                        "answer_mass": 0.0,
+                    }
+
                 subdivision_cache[cache_key] = (frame, vision_result)
             else:
                 frame, vision_result = subdivision_cache[cache_key]
@@ -100,6 +126,7 @@ class GuitarVisionService:
                 visual_fret=vision_result["visual_fret"],
                 finger=vision_result.get("finger", "unknown"),
                 gemini_answer=vision_result.get("gemini_answer"),
+                openai_answer=vision_result.get("openai_answer"),
                 jev_answer=vision_result.get("jev_answer"),
                 jev_probabilities=vision_result.get("jev_probabilities", {}),
                 answer_mass=vision_result.get("answer_mass", 0.0),

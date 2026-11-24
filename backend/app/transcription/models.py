@@ -19,6 +19,7 @@ class TabNote(BaseModel):
     jev_answer: str | None = None
     jev_probabilities: dict[str, float] = {}
     answer_mass: float = 0.0
+    openai_answer: dict | None = None
 
 
 class VideoObservation(BaseModel):

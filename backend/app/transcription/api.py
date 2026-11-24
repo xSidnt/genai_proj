@@ -49,12 +49,27 @@ def transcribe_job(
         raise HTTPException(status_code=422, detail="Analysis range must be at least 0.5 seconds")
 
     existing = repository.get(job_id, start, end)
-    gemini_enabled = bool(os.getenv("GEMINI_API_KEY"))
-    jev_enabled = os.getenv("JEV_VISION_ENABLED", "true").lower() not in {"0", "false", "no"}
+    provider = os.getenv("VISION_PROVIDER", "gemini").strip().lower()
+    provider_enabled = (
+        (provider == "gemini" and bool(os.getenv("GEMINI_API_KEY")))
+        or (provider == "openai" and bool(os.getenv("OPENAI_API_KEY")))
+        or provider in {"jev", "local", "off"}
+    )
     if existing:
         notes = existing["notes"]
-        has_vision_metadata = bool(notes) and all("gemini_answer" in note or "jev_answer" in note for note in notes)
-        if (not gemini_enabled and not jev_enabled) or (gemini_enabled and has_vision_metadata) or (not gemini_enabled and jev_enabled and has_vision_metadata):
+        provider_field = {
+            "gemini": "gemini_answer",
+            "openai": "openai_answer",
+            "jev": "jev_answer",
+            "local": "jev_answer",
+        }.get(provider)
+        has_provider_metadata = bool(notes) and (
+            provider == "off" or (
+                provider_field is not None
+                and all(provider_field in note for note in notes)
+            )
+        )
+        if provider_enabled and has_provider_metadata:
             return TranscriptionResult(
                 job_id=job_id,
                 start_seconds=start,

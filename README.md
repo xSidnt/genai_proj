@@ -417,3 +417,5 @@ The vision pass reports hand visibility, fretting-hand plausibility, neck-edge v
 Results are cached by `(job_id, start_seconds, end_seconds)` in SQLite. The original video and extracted WAV remain stored for frame analysis and evaluation.
 
 Gemini cloud vision is optional and activates when `GEMINI_API_KEY` is set in `backend/.env`. Copy `backend/.env.example`, add the key, and optionally set `GEMINI_MODEL` (default: `gemini-2.5-flash-lite`). Gemini receives a frame, detected MIDI pitch, and pitch-compatible string/fret candidates; it returns strict JSON including optional finger identity and confidence. If no key is configured or Gemini fails, MediaPipe/Jev remain as fallbacks.
+
+Set `VISION_PROVIDER=gemini`, `openai`, `jev`, `local`, or `off` in `backend/.env`. Gemini uses `GEMINI_API_KEY` and `GEMINI_MODEL`; OpenAI uses `OPENAI_API_KEY` and `OPENAI_MODEL`. The default inexpensive OpenAI model is configured as `gpt-6-luna`, subject to current provider availability. Cloud providers fall back to unavailable/local handling if their key or request fails.
