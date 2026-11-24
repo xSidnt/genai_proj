@@ -293,7 +293,17 @@ Basic Pitch can be converted into an application-owned format rather than passed
 }
 ```
 
-The backend owns pitch detection and tab mapping. The frontend receives JSON and only renders it.
+The backend owns pitch detection and maps each detected MIDI pitch to a standard-tuning string and fret. The frontend receives the resulting JSON and renders a six-line tablature staff in `frontend/src/components/GuitarTabStaff.tsx`.
+
+The current staff:
+
+- Places each detected fret number on its mapped string.
+- Positions notes horizontally by their detected start time.
+- Shows second markers on a ruler and supports horizontal scrolling.
+- Displays all model events, including low-confidence detections; note confidence affects marker opacity and is available on hover.
+- Does not yet quantize notes to beats, draw measure bars, infer tempo, or optimize a whole phrase for comfortable fingering.
+
+This is a working visual prototype of the model output, not yet polished or musically corrected tablature.
 
 ### MVP limitations
 
@@ -310,6 +320,36 @@ Expected limitations include:
 
 The transcription endpoint should use an asynchronous job. Processing should not block the upload request because audio models are slower than FFmpeg extraction.
 
+### Observed accuracy issue and next iteration
+
+In the first real-video check, Basic Pitch returned many notes during the opening seconds when the visible guitarist was not yet playing (there may be background guitar/audio). The current implementation displays all detections and does not identify which audible instrument belongs to the visible performer. This is expected to be a model/source-selection limitation, not a tablature-rendering issue.
+
+Recommended next steps, in order:
+
+1. Keep the raw model output for debugging, but add an adjustable confidence threshold and test stricter Basic Pitch onset/frame thresholds against real guitar clips. Do not assume thresholding alone identifies the foreground guitarist.
+2. Add user-selectable start/end points for the section to transcribe. The user can exclude an intro or background-only section using the video preview; FFmpeg should trim the extracted audio to that range before inference, and returned note times should be offset back to the full-video timeline.
+3. Evaluate separated audio or a guitar-focused transcription model on clips where background music overlaps the performance. General source-separation stems are not guaranteed to isolate guitar from every mix.
+4. Build a small evaluation set with labeled examples for silence/background-only, single-note playing, chords, and noisy recordings. Compare false detections and missed notes before tuning the model further.
+5. After note detections are reasonably reliable, improve fret-position continuity and add beat/measure quantization. Better tab rendering cannot correct incorrect pitch detections.
+
+### Vision-assisted guitar analysis
+
+A vision model can complement audio transcription, but a general video/vision-language model should not be expected to read exact strings and frets reliably. Fretboard details are small, fingers occlude strings, and camera perspective/resolution vary.
+
+Recommended hybrid design:
+
+1. Preserve timestamps while decoding the video. Sample a coarse pass around 2 frames/second to locate visible playing regions and check whether the fretboard is in view. This is for activity windows, not note transcription.
+2. Use the audio model to detect note pitches, onset times, durations, and chord groups.
+3. For each audio onset/chord, inspect one or more nearby high-resolution video frames (for example, around onset minus 100 ms, onset, and onset plus 100 ms). Event-based sampling is more useful than asking about every fixed 0.5-second interval, which can miss fast note changes or spend work where no note was detected.
+4. If the neck is clear enough, use a specialized fretboard/hand detector and camera geometry to estimate candidate string/fret positions. Use the audio pitch and guitar tuning to constrain which positions are musically possible.
+5. Combine the audio pitch, candidate visual fingering, and continuity/playability into a confidence score. Keep uncertain notes reviewable and let the user correct them.
+
+Example outputs for a vision pass could include `playing_visible`, `fretting_hand_visible`, `picking_hand_active`, `neck_visible`, and a confidence score, all tied to a video timestamp. A later Jev call could classify a structured text representation of these signals or rank a finite set of already-generated candidates. Jev cannot receive the image pixels itself.
+
+A Gemini-class multimodal model is appropriate for coarse questions such as “does the person appear to be playing during this time range?” or for helping a user mark the performance region. It is not the first choice for frame-accurate note transcription or exact fret/string classification. Use selected frames with timestamps rather than asking a general model to generate a full tab from the whole clip. The proposed sample rates are starting points to evaluate, not fixed requirements; adjust for the clip's frame rate and note speed.
+
+**Jev is different from a vision-language model.** TypeSafe describes Jev as a structured classification/decision model: it receives text plus questions and returns predefined outputs such as yes/no, a choice, or a score with probabilities. It does not accept raw video frames or images, and it does not generate free-form text. Jev could potentially classify text features produced by a separate vision/audio pipeline (for example, activity labels and timestamps), but it cannot itself inspect the guitar video. Verify current modalities and API details against the [TypeSafe Jev announcement](https://typesafe.ai/blog/introducing-system-one-models-and-jev) and [TypeSafe documentation](https://docs.typesafe.ai/introduction).
+
 ## Alternative approaches to evaluate later
 
 - **Crepe:** useful for monophonic pitch tracking, but less suitable for complete chord detection.
@@ -325,3 +365,7 @@ Do not use Docling for transcription. Docling processes documents; it does not c
 - The upload API is under `POST /api/uploads`.
 - The API health check is under `GET /api/health`.
 - Uploaded files should be stored in object storage in production rather than only on a local server filesystem.
+
+## Tablature workspace and playback
+
+The tablature panel takes roughly 55% of the desktop workspace; the video and chat panels retain narrower columns. The tab staff is divided into compact eight-second timeline rows rather than one long horizontal strip. Each row has its own time ruler, and the red playhead appears in the row matching the video's current playback/seek position. Scroll vertically for additional rows; horizontal scrolling remains available at narrower widths. These are time windows, not musical measures, because tempo and beat quantization are not implemented yet.

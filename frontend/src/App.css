@@ -109,7 +109,7 @@
 
 .workspace {
   display: grid;
-  grid-template-columns: minmax(260px, 0.95fr) minmax(340px, 1.2fr) minmax(270px, 0.9fr);
+  grid-template-columns: minmax(230px, 0.72fr) minmax(540px, 1.8fr) minmax(230px, 0.72fr);
   align-items: stretch;
   gap: 16px;
 }
@@ -280,6 +280,134 @@
   font-size: 12px;
   line-height: 1.8;
   white-space: pre;
+}
+
+.tab-scroll {
+  min-width: 0;
+  max-height: 440px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fcfbfd;
+  scrollbar-color: #c9bfd9 #f4f1f8;
+  scrollbar-width: thin;
+}
+
+.tab-staff {
+  position: relative;
+  min-width: 620px;
+  min-height: 0;
+  padding: 2px 0 10px;
+  font-family: var(--mono);
+}
+
+.tab-segment + .tab-segment {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.tab-segment-active {
+  border-radius: 8px;
+  background: linear-gradient(90deg, rgb(121 82 189 / 3%), transparent 75%);
+}
+
+.tab-segment-heading {
+  margin: 0 0 2px 12px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.tab-ruler {
+  position: relative;
+  height: 24px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.tab-time-tick {
+  position: absolute;
+  top: 6px;
+  transform: translateX(-50%);
+}
+
+.tab-strings {
+  position: relative;
+  height: 180px;
+}
+
+.tab-string-row {
+  position: absolute;
+  right: 0;
+  left: 0;
+}
+
+.tab-tuning-label {
+  position: absolute;
+  left: 13px;
+  z-index: 1;
+  width: 20px;
+  transform: translateY(-50%);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.tab-string-line {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  left: 38px;
+  height: 1px;
+  background: #bcb4c8;
+}
+
+.tab-beat-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgb(188 180 200 / 28%);
+}
+
+.tab-playhead {
+  position: absolute;
+  z-index: 4;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  transform: translateX(-1px);
+  background: #e45c70;
+  box-shadow: 0 0 0 1px rgb(228 92 112 / 14%);
+  pointer-events: none;
+  transition: left 100ms linear;
+}
+
+.tab-note {
+  position: absolute;
+  z-index: 2;
+  min-width: 19px;
+  padding: 1px 3px;
+  transform: translate(-50%, -50%);
+  border: 1px solid #6c48a8;
+  border-radius: 5px;
+  color: white;
+  background: #7952bd;
+  box-shadow: 0 1px 3px rgb(34 30 55 / 16%);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+}
+
+.tab-string-names {
+  padding: 2px 12px 0 38px;
+  color: var(--text-muted);
+  font-size: 9px;
+  letter-spacing: 5px;
 }
 
 .tabs-panel > .helper-text {

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import GuitarTabStaff from './GuitarTabStaff'
 
 interface TabNote {
   pitch: string
@@ -18,25 +19,31 @@ interface TranscriptionResult {
   notes: TabNote[]
 }
 
-interface TabsPanelProps {
-  jobId: string | null
+interface TranscriptionErrorState {
+  jobId: string
+  message: string
 }
 
-export default function TabsPanel({ jobId }: TabsPanelProps) {
+interface TabsPanelProps {
+  jobId: string | null
+  playbackTime: number
+  videoDuration: number
+}
+
+export default function TabsPanel({ jobId, playbackTime, videoDuration }: TabsPanelProps) {
   const [transcription, setTranscription] = useState<TranscriptionResult | null>(null)
-  const [status, setStatus] = useState('Waiting for upload')
+  const [transcriptionError, setTranscriptionError] = useState<TranscriptionErrorState | null>(null)
 
   useEffect(() => {
     if (!jobId) return
+    const activeJobId = jobId
 
     let cancelled = false
-    setTranscription(null)
-    setStatus('Transcribing...')
 
     async function transcribe() {
       try {
         const response = await fetch(
-          `http://127.0.0.1:8000/api/transcriptions/${jobId}`,
+          `http://127.0.0.1:8000/api/transcriptions/${activeJobId}`,
           { method: 'POST' },
         )
         const result = await response.json()
@@ -45,12 +52,14 @@ export default function TabsPanel({ jobId }: TabsPanelProps) {
         }
         if (!cancelled) {
           setTranscription(result as TranscriptionResult)
-          setStatus('Ready')
+          setTranscriptionError(null)
         }
       } catch (error) {
         if (!cancelled) {
-          setStatus('Transcription failed')
-          window.alert(error instanceof Error ? error.message : 'Transcription failed')
+          setTranscriptionError({
+            jobId: activeJobId,
+            message: error instanceof Error ? error.message : 'Transcription failed',
+          })
         }
       }
     }
@@ -61,9 +70,15 @@ export default function TabsPanel({ jobId }: TabsPanelProps) {
     }
   }, [jobId])
 
-  const visibleNotes = transcription?.notes
-    .filter((note) => note.confidence >= 0.45)
-    .slice(0, 40) ?? []
+  const activeTranscription = transcription?.job_id === jobId ? transcription : null
+  const activeError = transcriptionError?.jobId === jobId ? transcriptionError : null
+  const status = activeTranscription
+    ? 'Ready'
+    : activeError
+      ? 'Transcription failed'
+      : jobId
+        ? 'Transcribing...'
+        : 'Waiting for upload'
 
   return (
     <section className="panel tabs-panel">
@@ -75,38 +90,40 @@ export default function TabsPanel({ jobId }: TabsPanelProps) {
         <span className="panel-status">{status}</span>
       </div>
 
-      {transcription ? (
+      {activeTranscription ? (
         <>
           <div className="song-details">
             <div>
               <strong>Detected notes</strong>
-              <span>Standard tuning · E A D G B E</span>
+              <span>Tuning · {activeTranscription.tuning.join('  ')}</span>
             </div>
-            <span className="tempo">{transcription.notes.length} notes</span>
+            <span className="tempo">{activeTranscription.notes.length} notes</span>
           </div>
 
-          <div className="tab-card">
-            {visibleNotes.length > 0 ? (
-              visibleNotes.map((note) => (
-                <div className="measure-label" key={`${note.start_seconds}-${note.midi}`}>
-                  <strong>{note.pitch}</strong>
-                  {' '}· string {note.string} · fret {note.fret}
-                  {' '}· {note.start_seconds.toFixed(2)}s
-                </div>
-              ))
-            ) : (
-              <div className="measure-label">No confident notes detected yet.</div>
-            )}
-          </div>
+          {activeTranscription.notes.length > 0 ? (
+            <GuitarTabStaff
+              notes={activeTranscription.notes}
+              playbackTime={playbackTime}
+              durationSeconds={videoDuration}
+            />
+          ) : (
+            <div className="tab-card">
+              <div className="measure-label">No notes were detected in this audio.</div>
+            </div>
+          )}
         </>
       ) : (
         <div className="tab-card">
-          <div className="measure-label">Upload a video to generate notes.</div>
+          <div className="measure-label">
+            {activeError?.message ?? (jobId
+              ? 'Analyzing audio and mapping notes to strings...'
+              : 'Upload a video to generate tabs.')}
+          </div>
         </div>
       )}
 
       <p className="helper-text">
-        Basic Pitch output mapped to standard guitar tuning.
+        Each fret number is placed on its detected string at the note’s start time. Scroll horizontally to explore the full recording. This is raw model output, not yet rhythm-quantized.
       </p>
     </section>
   )

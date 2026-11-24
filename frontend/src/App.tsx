@@ -6,6 +6,8 @@ import './App.css'
 
 function App() {
   const [jobId, setJobId] = useState<string | null>(null)
+  const [videoDuration, setVideoDuration] = useState(0)
+  const [playbackTime, setPlaybackTime] = useState(0)
 
   return (
     <main className="app-shell">
@@ -35,8 +37,15 @@ function App() {
       </section>
 
       <div className="workspace">
-        <VideoPanel setJobId={setJobId} />
-        <TabsPanel jobId={jobId} />
+        <VideoPanel
+          onPlaybackTimeChange={setPlaybackTime}
+          setUploadInfo={(nextJobId, duration) => {
+            setJobId(nextJobId)
+            setVideoDuration(duration)
+            setPlaybackTime(0)
+          }}
+        />
+        <TabsPanel jobId={jobId} playbackTime={playbackTime} videoDuration={videoDuration} />
         <ChatPanel />
       </div>
 

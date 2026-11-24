@@ -1,4 +1,4 @@
-import { useEffect, useState, type ChangeEvent } from 'react'
+import { useEffect, useRef, useState, type ChangeEvent } from 'react'
 
 interface UploadResult {
   job_id: string
@@ -11,31 +11,31 @@ interface UploadResult {
 }
 
 interface VideoPanelProps {
-  setJobId: (jobId: string) => void
+  setUploadInfo: (jobId: string, durationSeconds: number) => void
+  onPlaybackTimeChange: (seconds: number) => void
 }
 
-export default function VideoPanel({ setJobId }: VideoPanelProps) {
+export default function VideoPanel({ setUploadInfo, onPlaybackTimeChange }: VideoPanelProps) {
   const [videoFile, setVideoFile] = useState<File | null>(null)
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [uploadStatus, setUploadStatus] = useState('No video')
   const [uploadResult, setUploadResult] = useState<UploadResult | null>(null)
+  const videoUrlRef = useRef<string | null>(null)
 
   useEffect(() => {
-    if (!videoFile) {
-      setVideoUrl(null)
-      return
+    return () => {
+      if (videoUrlRef.current) URL.revokeObjectURL(videoUrlRef.current)
     }
-
-    const url = URL.createObjectURL(videoFile)
-    setVideoUrl(url)
-
-    return () => URL.revokeObjectURL(url)
-  }, [videoFile])
+  }, [])
 
   async function handleVideoChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
     if (!file) return
 
+    if (videoUrlRef.current) URL.revokeObjectURL(videoUrlRef.current)
+    const nextVideoUrl = URL.createObjectURL(file)
+    videoUrlRef.current = nextVideoUrl
+    setVideoUrl(nextVideoUrl)
     setVideoFile(file)
     setUploadResult(null)
     setUploadStatus('Uploading...')
@@ -56,7 +56,10 @@ export default function VideoPanel({ setJobId }: VideoPanelProps) {
 
       setUploadResult(result as UploadResult)
       setUploadStatus('Ready')
-      setJobId((result as UploadResult).job_id)
+      setUploadInfo(
+        (result as UploadResult).job_id,
+        (result as UploadResult).duration_seconds,
+      )
     } catch (error) {
       setUploadStatus('Upload failed')
       setUploadResult(null)
@@ -76,7 +79,13 @@ export default function VideoPanel({ setJobId }: VideoPanelProps) {
 
       <div className="video-stage">
         {videoUrl ? (
-          <video className="video-preview" src={videoUrl} controls />
+          <video
+            className="video-preview"
+            src={videoUrl}
+            controls
+            onTimeUpdate={(event) => onPlaybackTimeChange(event.currentTarget.currentTime)}
+            onSeeked={(event) => onPlaybackTimeChange(event.currentTarget.currentTime)}
+          />
         ) : (
           <div className="video-empty">
             <div className="play-icon">▶</div>
