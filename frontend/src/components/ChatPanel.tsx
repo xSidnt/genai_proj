@@ -1,6 +1,16 @@
 import { useState, type FormEvent } from 'react'
 
-export default function ChatPanel() {
+interface ChatPanelProps {
+  jobId: string | null
+  startSeconds: number
+  endSeconds: number
+}
+
+export default function ChatPanel({
+  jobId,
+  startSeconds,
+  endSeconds,
+}: ChatPanelProps) {
   const [messages, setMessages] = useState([
     {
       role: 'assistant',
@@ -8,17 +18,48 @@ export default function ChatPanel() {
     },
   ])
   const [draft, setDraft] = useState('')
+  const [isSending, setIsSending] = useState(false)
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const message = draft.trim()
-    if (!message) return
+    if (!message || !jobId || isSending) return
 
     setMessages((currentMessages) => [
       ...currentMessages,
       { role: 'user', text: message },
     ])
     setDraft('')
+    setIsSending(true)
+
+    try {
+      const response = await fetch('http://127.0.0.1:8000/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          job_id: jobId,
+          message,
+          start_seconds: startSeconds,
+          end_seconds: endSeconds,
+        }),
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.detail || 'Chat request failed')
+      setMessages((currentMessages) => [
+        ...currentMessages,
+        { role: 'assistant', text: result.reply as string },
+      ])
+    } catch (error) {
+      setMessages((currentMessages) => [
+        ...currentMessages,
+        {
+          role: 'assistant',
+          text: error instanceof Error ? error.message : 'Chat request failed',
+        },
+      ])
+    } finally {
+      setIsSending(false)
+    }
   }
 
   return (
@@ -49,12 +90,19 @@ export default function ChatPanel() {
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
         />
-        <button className="send-button" type="submit" aria-label="Send message">
-          ↑
+        <button
+          className="send-button"
+          type="submit"
+          aria-label="Send message"
+          disabled={isSending || !jobId}
+        >
+          {isSending ? '…' : '↑'}
         </button>
       </form>
 
-      <p className="helper-text">Chat replies will be connected later.</p>
+      <p className="helper-text">
+        Answers use the detected tabs and selected analysis range.
+      </p>
     </section>
   )
 }

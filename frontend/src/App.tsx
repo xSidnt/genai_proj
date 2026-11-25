@@ -63,7 +63,11 @@ function App() {
           startSeconds={startSeconds}
           endSeconds={endSeconds}
         />
-        <ChatPanel />
+        <ChatPanel
+          jobId={jobId}
+          startSeconds={startSeconds}
+          endSeconds={endSeconds}
+        />
       </div>
 
       <footer className="page-footer">
