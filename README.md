@@ -1,491 +1,168 @@
-# Riffroom
+# CroissantDough
 
-Riffroom is a modular monolith for turning short guitar videos into guitar tabs and providing AI-assisted explanations of the detected music.
+CroissantDough turns short guitar performance videos into tablature that follows video playback. Audio estimates what was played and when. Optional local vision helps choose the string and fret when the same pitch can be played in several positions.
 
-## Product goal
+**Group 74 · Generative AI project · Dr. Charchit Chandra**
 
-The current MVP allows a user to upload a 30-second to 60-second guitar video, preview it in the React frontend, send it to the backend, validate it, extract media metadata, and convert the video's audio into a format suitable for transcription.
+[Technical report (PDF)](docs/CroissantDough-Technical-Report.pdf) · [Benchmark methods and results](BENCHMARK.md)
 
-The future transcription pipeline will:
+![CroissantDough showing synchronized tabs and fixed fretboard calibration for Realiti](docs/croissantdough-realiti.png)
 
-1. Detect notes and their timings in the extracted audio.
-2. Estimate pitches and convert them to frets and guitar strings.
-3. Generate playable tablature.
-4. Let the user ask questions about the result through an AI chat panel.
+The screenshot shows the current interface replaying saved results for Lizzie Skevington’s *Realiti* cover.
 
-## Architecture
+## Run locally
+
+### Prerequisites
+
+- Python 3.11 and [uv](https://docs.astral.sh/uv/)
+- Node.js 22.12 or newer and npm
+- FFmpeg and ffprobe on your PATH
+- Internet access to install dependencies. The first use of **Isolated guitar** also downloads the Demucs weights.
+
+The development and evaluation environment was macOS on Apple Silicon. Audio transcription and calibrated local vision run on CPU and require no API keys. Git includes the GuitarProFX TabCNN and MediaPipe hand landmark model files.
+
+On macOS with Homebrew, install FFmpeg and uv with `brew install ffmpeg uv`.
+
+### Start the backend
+
+```bash
+git clone https://github.com/xSidnt/genai_proj.git croissantdough
+cd croissantdough/backend
+uv sync --locked --python 3.11
+uv run --locked python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+Visit [API docs](http://127.0.0.1:8000/docs) or run `curl -fsS http://127.0.0.1:8000/api/health`. The health response is `{"status":"ok"}`.
+
+### Start the frontend
+
+In a second terminal, from the repository root, run:
+
+```bash
+cd frontend
+npm ci
+npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
+```
+
+Open [CroissantDough](http://127.0.0.1:5173). The frontend calls the API on port 8000. The backend accepts browser requests from port 5173 on localhost or 127.0.0.1.
+
+## Reproduce the demo
+
+### Audio-only transcription
+
+1. Upload an MP4, MOV, or WebM clip with an audio track. The app accepts up to 60 seconds and 100 MB. For a first run, use a short solo guitar clip in standard tuning.
+2. Keep **Solo electric guitar** selected. This uses **Electric Guitar (TabCNN)**, **Original audio**, **Melody and chords**, and **Vision Off**.
+3. Select a time range of at least 0.5 seconds and click **Analyze selected range**.
+4. Start playback to follow the tab. Hover over a fret number for the detected timestamp and available note details. Adjust **BPM** if the estimated grid is off. Reanalyze to apply an updated BPM to single-note lead selection.
+
+| Preset | Settings | Use |
+| --- | --- | --- |
+| Solo electric guitar | TabCNN, original audio, melody and chords, vision off | Solo electric guitar and chord passages |
+| Pitch and timing | Basic Pitch with playable fingering, original audio, melody and chords, vision off | Compare audio pitch and onset detection |
+| Single-note lead with backing | TabCNN, isolated guitar, single-note lead, fixed calibration | One lead part over accompaniment with a visible fretting hand |
+
+### Audio and local vision
+
+1. Pause on a clear frame where two identifiable fret wires surround the playing area. Click **Calibrate fretboard** and choose their numbers. Use **Nut** for fret zero.
+2. Mark the four points in the order shown by the app: low E then high e on the start wire, followed by high e then low E on the end wire.
+3. Choose **Fixed calibration** to reuse that mapping or **Track fretboard** to update it as the neck moves. Click **Analyze with audio + vision**.
+4. Use **Show audio-only positions** to compare the original and vision-assisted string and fret positions for the same detected notes. Amber notes indicate a conflict with the estimated hand position. A calibrated comparison is temporary. Audio-only analysis is saved for its selected range.
+
+### Realiti case study
+
+The report used the 51.7-second Lizzie Skevington cover and the [published lead-guitar tab](https://www.songsterr.com/a/wsa/lizzie-skevington-realiti-tab-s3267244). If you have the same cover clip, use these settings:
+
+| Setting | Value |
+| --- | --- |
+| Analysis range | 0.78–50.94 seconds |
+| Preset | Single-note lead with backing |
+| BPM override | 115 |
+| Calibration | A frame near 1.03 seconds with wires 2 and 12 marked |
+| Comparison | Vision off, fixed calibration, and tracked fretboard |
+
+The report explains how the 24-bar reference was timed and scored. Supply your own copy of the same cover to rerun inference. The screenshot and reported results are available in this repository.
+
+## How it works
+
+1. **Media preparation.** FastAPI validates the upload. ffprobe reads duration and frame rate, and FFmpeg extracts and trims the audio. The selected range feeds the note detector. Demucs `htdemucs_6s` optionally separates the guitar stem, with original audio used if separation fails.
+2. **Audio transcription.** GuitarProFX TabCNN classifies fret or silence independently on each of six strings from short constant-Q windows. Adjacent frames become note events. Basic Pitch supplies evidence of repeated attacks and can also run as a standalone pitch detector. The tempo estimator provides the beat grid.
+3. **Local vision.** OpenCV rectifies the marked fretboard and can attempt to re-anchor to the reference as the neck moves. MediaPipe detects hand landmarks near audio note onsets. Fingertip positions, index-finger reach, and three two-string zones provide evidence about plausible frets and strings.
+4. **Playable tab selection.** A Viterbi-style search ranks pitch-compatible positions and penalizes difficult transitions. Vision changes the estimated placement while preserving the audio pitch and onset. The browser renders the resulting tab against video playback.
 
 ```text
-genai_proj/
-├── frontend/                 # React + TypeScript + Vite
-├── backend/
-│   ├── app/
-│   │   ├── audio/            # WAV extraction and trimming, Demucs, note detection, BPM
-│   │   ├── video/            # Video metadata, frame analysis, and vision providers
-│   │   ├── transcription/    # API, audio/video orchestration, result models, and SQLite
-│   │   ├── upload/           # Upload API, validation, and job persistence
-│   │   ├── chat/             # Questions about saved transcription results
-│   │   └── main.py           # FastAPI application composition
-│   ├── data/                 # SQLite database and application state
-│   ├── storage/
-│   │   ├── uploads/          # Original uploaded videos
-│   │   ├── audio/            # Extracted WAV audio files
-│   │   └── models/           # MediaPipe hand landmark model
-│   ├── pyproject.toml
-│   └── uv.lock
-└── README.md
+frontend/src/                 React and TypeScript interface
+backend/app/upload/           Video validation and upload metadata
+backend/app/audio/            Audio extraction, separation, models, and fingering
+backend/app/video/            Fretboard geometry, landmark evidence, and tracking
+backend/app/transcription/    Analysis orchestration, API, and SQLite persistence
+backend/storage/models/       Bundled TabCNN and MediaPipe model files
+backend/scripts/              Evaluation scripts
+backend/tests/                Local fingering and vision regression tests
+docs/                         Technical report and application screenshot
 ```
 
-This is a modular monolith:
+## Results and reproducibility
 
-- The frontend and backend are separate applications inside one repository.
-- Upload calls into `video/` to read metadata and `audio/` to extract a WAV.
-- The transcription API runs the audio analysis, passes timed notes to the video analysis, and saves the combined result for the tab renderer and chat.
-- Uploaded videos, generated WAV files, databases, virtual environments, and secrets stay out of version control.
+The audio runs compare the same GuitarProFX checkpoint on original audio before and after attack refinement. Exact-tab F1 scores a correct string and fret with an onset within ±50 ms. Missed and extra notes reduce F1.
 
-## Tech stack
+| Audio benchmark | Raw GuitarProFX TabCNN | CroissantDough audio pipeline |
+| --- | ---: | ---: |
+| EGSet12, 12 recordings | 36.6% | **42.5%** |
+| Guitar-TECHS, 12 amplifier-microphone recordings | 22.8% | **24.0%** |
 
-### Frontend
+On *Realiti*, the three isolated-lead variants shared 303 scored predictions and 59.5% pitch F1. Their differences reflect string and fret placement over the same audio detections.
 
-- React
-- TypeScript
-- Vite
-- npm
-- Lucide React
-- ESLint
+| Realiti vision mode | Exact matches out of 295 | Exact-tab F1 at ±50 ms |
+| --- | ---: | ---: |
+| Off | 63 | 21.1% |
+| Fixed calibration | **137** | **45.8%** |
+| Track fretboard | 133 | 44.5% |
 
-### Backend
+Vision depends on calibration and hand visibility. The tapping passage remained difficult, and vision cannot recover notes that the audio model missed. The single-note lead filter limits output to one attack per sixteenth-note slot and can remove genuine notes in polyphonic passages.
 
-- Python
-- FastAPI
-- Pydantic
-- SQLite
-- FFmpeg
-- ffprobe
-- Demucs (`htdemucs_6s` guitar stem)
-- Basic Pitch
-- uv
+### Run the benchmark scripts
 
-## Requirements
-
-- Node.js and npm
-- Python 3.11 (required for the current macOS Basic Pitch dependencies)
-- FFmpeg and ffprobe
-- uv
-
-Install FFmpeg on macOS with:
+Download the datasets from their linked releases. Run these commands from `backend/` after dependency installation.
 
 ```bash
-brew install ffmpeg uv
+# EGSet12 expects a folder containing the paired WAV and JAMS files.
+uv run --locked python -m scripts.benchmark_egset12 /path/to/EGSet12 \
+  --include-isolated --original-tabcnn-weights /path/to/tabcnn.onnx
+
+# Guitar-TECHS accepts the P3_music.zip archive directly.
+uv run --locked python -m scripts.benchmark_guitar_techs /path/to/P3_music.zip
+
+# GuiFiR-Vid accepts an extracted clip folder and the test annotation file.
+uv run --locked python -m scripts.benchmark_guifir /path/to/raw_clips \
+  /path/to/guifir_test_coco_anno_box.jsonl
 ```
 
-## Frontend setup
+See [BENCHMARK.md](BENCHMARK.md) for the exact GuiFiR clip list, reference construction, tolerance comparisons, and the dense video evaluator. The original TabCNN weights used for the separate EGSet12 baseline are available from the [ONNX model export](https://huggingface.co/cstr/tabcnn-onnx).
+
+### Verify the setup
+
+Run the backend tests from `backend/`:
 
 ```bash
-cd frontend
-npm install
-npm run dev
+uv run --locked python -m unittest discover -s tests -v
 ```
 
-Open `http://localhost:5173`.
-
-Build and validate the frontend with:
+Run the frontend checks from `frontend/`:
 
 ```bash
-cd frontend
-npm run build
 npm run lint
+npm run build
 ```
 
-## Backend setup
+### Troubleshooting
 
-```bash
-cd backend
-uv python install 3.11
-uv venv --python 3.11 --clear .venv
-uv sync
-.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
-```
+- **The upload fails.** Check the backend health endpoint and confirm the video has audio, uses a supported format, and fits the upload limits.
+- **Analyze with audio + vision is disabled.** Complete all four calibration marks and confirm a valid time range.
+- **A first run takes a while.** For a quick first check, use **Original audio**, a short range, and **Vision Off**. Demucs downloads on first use and runs on CPU. Check **Source** in the results to see whether the app used the separated stem or fell back to original audio.
 
-Open `http://127.0.0.1:8000/docs` for the interactive API documentation.
+## Sources and model credits
 
-Check API health:
-
-```bash
-curl http://127.0.0.1:8000/api/health
-```
-
-Create a transcription for an uploaded job:
-
-```bash
-curl -X POST http://127.0.0.1:8000/api/transcriptions/JOB_ID
-```
-
-Retrieve an existing transcription:
-
-```bash
-curl http://127.0.0.1:8000/api/transcriptions/JOB_ID
-```
-
-## Current upload behavior
-
-The upload endpoint accepts:
-
-- MP4
-- MOV
-- WebM
-- Maximum file size: 100 MB
-- Maximum duration: 60 seconds
-
-The frontend sends a video using `multipart/form-data`. The endpoint currently performs these steps:
-
-1. Validates the file extension.
-2. Stores the original upload under `backend/storage/uploads/<job-id>/`.
-3. Uses ffprobe to determine duration, width, height, and frame rate.
-4. Rejects videos longer than 60 seconds.
-5. Uses FFmpeg to extract stereo 44.1 kHz PCM WAV audio (two channels are retained for source separation).
-6. Stores job metadata and file paths in `backend/data/videos.sqlite3`.
-7. Returns metadata to the frontend.
-
-## What WAV is
-
-WAV is an audio file format. It stores sampled audio as waveform data. A WAV file is not video and normally does not contain the visual frames from a guitar performance.
-
-WAV is useful for transcription because it is widely supported and provides a simple, uncompressed representation of sound. The current file is also converted to:
-
-- **PCM 16-bit samples:** stores each audio sample as signed 16-bit data.
-- **Stereo:** preserves left and right channels because Demucs source separation benefits from the original stereo mix. If the uploaded video is mono, FFmpeg duplicates the mono channel to both sides.
-- **44.1 kHz:** captures 44,100 samples per second.
-
-### Why FFmpeg is used
-
-FFmpeg separates the audio from the uploaded video and performs format conversion. ffprobe is the metadata-reading companion to FFmpeg.
-
-The extraction command used by the backend is conceptually:
-
-```bash
-ffmpeg -i input.mp4 -vn -ac 2 -ar 44100 -acodec pcm_s16le output.wav
-```
-
-The command means:
-
-- `-i input.mp4`: read the uploaded video.
-- `-vn`: discard video frames; produce audio only.
-- `-ac 2`: output two channels for source separation.
-- `-ar 44100`: resample the audio to 44.1 kHz.
-- `-acodec pcm_s16le`: encode uncompressed signed 16-bit PCM audio.
-- `output.wav`: write the extracted audio file.
-
-Metadata is obtained with ffprobe and can include duration, resolution, and frame rate.
-
-### Why stereo 44.1 kHz is used
-
-A stereo mix retains spatial cues that can help source-separation models. The transcription model can downmix the isolated guitar stem when it analyzes pitch.
-
-44.1 kHz is a common audio format for music and a useful balance between detail and processing size. A 60-second, stereo, 44.1 kHz, 16-bit WAV contains 60 × 44,100 × 2 channels × 2 bytes, approximately 10.6 MB for the audio itself.
-
-The stereo audio is used as input to Demucs. Basic Pitch receives Demucs' isolated guitar stem when available; the current pipeline falls back to the original stereo mix if separation fails.
-
-## How the frontend understands the upload
-
-The website does not directly analyze FFmpeg's WAV output. The React frontend uploads the original video and displays the return value from the backend.
-
-The frontend uses:
-
-- `FormData` to place the file in a `multipart/form-data` HTTP request.
-- `fetch` to call `POST /api/uploads`.
-- `URL.createObjectURL()` to create a temporary browser preview URL for the original video.
-- The JSON response to display duration, width, height, and frame rate.
-
-The upload endpoint returns metadata similar to:
-
-```json
-{
-  "job_id": "unique-job-id",
-  "status": "ready",
-  "duration_seconds": 42,
-  "width": 1920,
-  "height": 1080,
-  "frame_rate": 30,
-  "video_path": "backend/storage/uploads/unique-job-id/source.mp4",
-  "audio_path": "backend/storage/audio/unique-job-id/audio.wav"
-}
-```
-
-The browser does not need to understand WAV internals. Python processes the WAV through FFmpeg and later through a transcription model.
-
-## Docling and transcription
-
-Docling is not used for this feature. It is designed to extract structured information from documents such as PDFs, Word documents, and presentations.
-
-The WAV is intended for a music/audio transcription model instead. A first implementation may use an open-source pitch or transcription model such as Basic Pitch, followed by logic that converts detected notes and timings into guitar strings and frets.
-
-The website will understand tab information only after the backend converts audio features into a structured JSON transcription containing values such as:
-
-```json
-{
-  "notes": [
-    { "pitch": "E2", "string": 6, "fret": 0, "start_seconds": 0.25, "duration_seconds": 0.50 }
-  ]
-}
-```
-
-That JSON can be rendered in React as tablature and then used as context for the AI chat feature.
-
-## Transcription strategy
-
-### Choose a note model and audio input
-
-**Electric Guitar (TabCNN)** estimates frets directly from audio. It is the website default and runs locally. **Basic Pitch + playable fingering** detects pitches and uses a bounded search across the phrase to favor smaller hand movements and playable chord shapes. Both models support **Original audio** and **Isolated guitar** as independent inputs. With TabCNN, Basic Pitch also supplies evidence for repeated attacks and possible bends or slides. The tab and chat treat technique hints as estimates.
-
-The **Solo electric guitar** preset starts with TabCNN, original audio, melody and chords, and vision off. **Pitch and timing** uses Basic Pitch on the same input. **Single-note lead with backing** uses TabCNN, the isolated guitar stem, single-note lead, and fixed calibration. Mark the fretboard to run either calibration mode. Select **Track fretboard** when you want the app to follow the marked area as the guitar moves.
-
-The bundled `tabcnn-gpfx.onnx` is the [CC BY 4.0 ONNX export by cstr](https://huggingface.co/cstr/tabcnn-onnx) of the GuitarProFX TabCNN weights published by Hegel Pedroza, Wallace Abreu, Ryan Corey, and Iran Roman with [EGSet12](https://zenodo.org/records/11406378). TabCNN was introduced by Andrew Wiggins and Youngmoo Kim. The training and evaluation resources include [GuitarSet](https://zenodo.org/records/3371780) by Qingyang Xi, Rachel M. Bittner, Johan Pauwels, Xuzhou Ye, and Juan Pablo Bello. Fretboard search and technique rules draw on [midi2tab](https://github.com/stephenmthomas/midi2tab) and [tabgen](https://github.com/aguilasa/tabgen).
-
-Choose **Single-note lead** for a passage with one melody note at a time. It keeps the strongest detected attack in each sixteenth-note slot and leaves empty slots as rests. Set the BPM before analyzing when you have a reference tempo. **Melody and chords** keeps the full polyphonic output.
-
-### Measure audio transcription quality
-
-See the [public benchmark report](BENCHMARK.md) for the lead preset, baseline model comparisons, and the GuiFiR-Vid vision test.
-
-Download matching `.wav` and `.jams` files from [EGSet12](https://zenodo.org/records/11406378) by Pedroza, Abreu, Corey, and Roman into the same directory. From `backend/`, run:
-
-```bash
-.venv/bin/python -m scripts.benchmark_egset12 /path/to/EGSet12 --include-isolated
-```
-
-The script reports note-level F1 for pitch and onset within 50 ms, then for pitch, onset, and exact string/fret. F1 counts both missed notes and extra detections. It scores each model with both arrangements and includes both audio inputs when `--include-isolated` is set. Lead mode uses the detected BPM, with 120 as a fallback.
-
-Results across all 12 EGSet12 recordings and 1,567 reference notes used the ONNX runtime for Basic Pitch. The recordings contain solo electric guitar and provide audio-only reference labels. EGSet12 was also used to evaluate the bundled TabCNN checkpoint in its original study. [EGSet12 and model weights](https://zenodo.org/records/11406378)
-
-| Model | Audio | Arrangement | Pitch F1 | Tab F1 | Total time |
-| --- | --- | --- | ---: | ---: | ---: |
-| Basic Pitch | Original | Melody and chords | **76.4%** | 42.4% | 7.5 s |
-| Basic Pitch | Original | Single-note lead | 60.5% | 30.0% | 7.5 s |
-| TabCNN | Original | Melody and chords | 58.6% | **42.5%** | 16.2 s |
-| TabCNN | Original | Single-note lead | 49.4% | 34.1% | 16.2 s |
-| Basic Pitch | Isolated guitar | Melody and chords | 71.3% | 39.0% | 114.4 s |
-| Basic Pitch | Isolated guitar | Single-note lead | 54.8% | 25.8% | 114.3 s |
-| TabCNN | Isolated guitar | Melody and chords | 54.6% | 37.3% | 122.7 s |
-| TabCNN | Isolated guitar | Single-note lead | 44.4% | 28.1% | 122.7 s |
-
-### Compare local vision on the Realiti opening
-
-An eight-second analysis was scored against the first 16 notes of the supplied Songsterr reference. Reference timing used the score's 115 BPM, an estimated first onset of 0.848 seconds, and a 65 ms onset tolerance. The table uses the app's estimated playback grid of 117 BPM. Fixed and tracked vision used the same manually marked frame around 1.03 seconds and the same fret wires, 2 and 12. Audio detections were held constant across the three vision modes. This is one passage from one performance. Timing, calibration, and backing-track balance can change the results.
-
-| Model | Audio | Arrangement | Pitch F1 | Tab F1, vision off | Tab F1, fixed | Tab F1, tracked |
-| --- | --- | --- | ---: | ---: | ---: | ---: |
-| Basic Pitch | Original | Melody and chords | 46.7% | 0.0% | 0.0% | 0.0% |
-| Basic Pitch | Original | Single-note lead | 46.2% | 0.0% | 0.0% | 0.0% |
-| TabCNN | Original | Melody and chords | 9.1% | 0.0% | 0.0% | 0.0% |
-| TabCNN | Original | Single-note lead | 0.0% | 0.0% | 0.0% | 0.0% |
-| Basic Pitch | Isolated guitar | Melody and chords | 78.6% | 0.0% | 0.0% | 0.0% |
-| Basic Pitch | Isolated guitar | Single-note lead | **81.5%** | 0.0% | 0.0% | 0.0% |
-| TabCNN | Isolated guitar | Melody and chords | 68.8% | 25.0% | 37.5% | 37.5% |
-| TabCNN | Isolated guitar | Single-note lead | 78.6% | 28.6% | **57.1%** | **57.1%** |
-
-The best Realiti lead settings matched eight reference string/fret positions with either calibration mode, up from four with vision off. A second sweep at the score's 115 BPM matched six positions with either calibration mode. At 117 BPM fixed calibration added about 1.0 second and tracking added about 2.1 seconds. Tracked vision matched all four measure anchors in the analyzed range. The vision pass adjusts fingering for detected notes and keeps their pitches and onsets.
-
-These tables document the settings sweep before hand-position constraints were added. With the same Realiti opening settings at 117 BPM, a follow-up run matched 11 of the first 16 reference positions with either calibration mode.
-
-### Implemented MVP model: Basic Pitch
-
-Basic Pitch and Demucs are installed in `backend/.venv` under Python 3.11.
-The verified macOS dependency set includes `setuptools<81` and `scikit-learn==1.5.1`.
-Python 3.12 failed because the Basic Pitch dependency chain resolves to a TensorFlow macOS wheel that only supports Python 3.11.
-The project also pins `numpy<2` because the selected PyTorch wheel is not compatible with NumPy 2.
-
-The backend provides:
-
-- `POST /api/transcriptions/{job_id}`: generate and save transcription notes.
-- `GET /api/transcriptions/{job_id}`: retrieve a saved transcription.
-
-The service reads the uploaded stereo WAV from SQLite job metadata, runs Demucs `htdemucs_6s` to isolate its `guitar` stem, passes that stem to Basic Pitch, maps each detected MIDI pitch to a standard-tuning string/fret, and stores the resulting JSON in SQLite. If separation fails, it logs the failure and runs Basic Pitch on the original mix. The response's `audio_source` field indicates `demucs_guitar`, `original_fallback`, or `original` for a legacy result.
-
-On first transcription, Demucs downloads its pretrained model weights. Separation currently runs on CPU and can take longer than the clip duration. The model weights are cached outside the repository by the model library; generated `guitar.wav` stems are stored under `backend/storage/audio/<job-id>/`.
-
-### MVP model choice
-
-Basic Pitch is a suitable baseline because it:
-
-- Accepts an audio file or waveform and detects notes and timing.
-- Returns MIDI-like note events and confidence values.
-- Supports polyphonic music, including chords.
-- Runs locally, avoiding a transcription API dependency during development.
-- Produces a useful baseline for short, clean guitar recordings.
-
-Basic Pitch is a pitch detector, not a complete guitar-to-tab converter. The backend must still:
-
-1. Read the extracted stereo 44.1 kHz WAV.
-2. Run Demucs `htdemucs_6s` and save its `guitar` stem to `backend/storage/audio/<job-id>/guitar.wav`.
-3. Run Basic Pitch on the guitar stem to detect note pitches and time ranges.
-4. Choose a plausible guitar-string and fret position for each pitch.
-5. Measure beats or tempo and group notes into measures.
-6. Return structured JSON for React to render as tabs.
-
-Demucs is a preprocessing step, not a guarantee of clean guitar isolation. Its six-stem model adds guitar and piano stems, and the upstream repository describes guitar quality as usable but subject to bleeding and artifacts. The project currently runs separation on CPU. Demucs' upstream repository is archived, so treat this as an experiment and measure its results on our own clips before making it a production dependency.
-
-An initial three-second excerpt check on one uploaded clip produced 21 Basic Pitch events from the original mix versus 1 event from the Demucs guitar stem (only 4 original events were at confidence ≥0.6). This is a useful smoke-test observation, not an accuracy benchmark: a short segment and one clip are not enough to conclude that Demucs improves all recordings.
-
-### MVP processing stages
-
-The processing pipeline is:
-
-1. `upload`: validate and store the video.
-2. `media`: extract and normalize the audio.
-3. `transcription`: detect pitches and note timing with Basic Pitch.
-4. `tab-generation`: map pitches to guitar strings and frets.
-5. `chat`: answer questions using the source video, transcript, and generated tabs.
-
-### Suggested transcription result
-
-Basic Pitch can be converted into an application-owned format rather than passed directly to React:
-
-```json
-{
-  "job_id": "unique-job-id",
-  "status": "ready",
-  "tuning": ["E2", "A2", "D3", "G3", "B3", "E4"],
-  "tempo_bpm": null,
-  "notes": [
-    {
-      "pitch": "E2",
-      "midi": 40,
-      "string": 6,
-      "fret": 0,
-      "start_seconds": 0.25,
-      "duration_seconds": 0.50,
-      "confidence": 0.92
-    }
-  ]
-}
-```
-
-The backend owns pitch detection and maps each detected MIDI pitch to a standard-tuning string and fret. The frontend receives the resulting JSON and renders a six-line tablature staff in `frontend/src/components/GuitarTabStaff.tsx`.
-
-The current staff:
-
-- Places each detected fret number on its mapped string.
-- Positions notes horizontally by their detected start time.
-- Shows second markers on a ruler and supports horizontal scrolling.
-- Displays all model events, including low-confidence detections; note confidence affects marker opacity and is available on hover.
-- Does not yet quantize notes to beats, draw measure bars, infer tempo, or optimize a whole phrase for comfortable fingering.
-
-This is a working visual prototype of the model output, not yet polished or musically corrected tablature.
-
-### MVP limitations
-
-Basic Pitch is a starting point, not a guaranteed transcription engine.
-
-Expected limitations include:
-
-- Chords and fast passages may be detected imprecisely.
-- A pitch alone can correspond to multiple fret positions.
-- Timing estimates can drift without a clear beat or metronome.
-- String selection may need playability scoring rather than one fixed rule.
-- Finger noise, room noise, effects, and poor lighting can reduce quality.
-- Notes played outside standard tuning require tuning detection or user input.
-
-The transcription endpoint should use an asynchronous job. Processing should not block the upload request because audio models are slower than FFmpeg extraction.
-
-### Observed accuracy issue and next iteration
-
-In the first real-video check, Basic Pitch returned many notes during the opening seconds when the visible guitarist was not yet playing (there may be background guitar/audio). The current implementation displays all detections and does not identify which audible instrument belongs to the visible performer. This is expected to be a model/source-selection limitation, not a tablature-rendering issue.
-
-The current tab output is not expected to match the performance reliably yet. Basic Pitch detects pitches from the complete audio mix; the current tab mapper then independently chooses the lowest-fret standard-tuning position for each pitch. It does not use the player's visible hand position, and the current renderer has no beat quantization. It can therefore show background notes, choose a different valid string/fret than the performer used, or place notes at imprecise times.
-
-Recommended next steps, in order:
-
-1. Keep the raw model output for debugging, but add an adjustable confidence threshold and test stricter Basic Pitch onset/frame thresholds against real guitar clips. Do not assume thresholding alone identifies the foreground guitarist.
-2. Add user-selectable start/end points for the section to transcribe. The user can exclude an intro or background-only section using the video preview; FFmpeg should trim the extracted audio to that range before inference, and returned note times should be offset back to the full-video timeline.
-3. Evaluate separated audio or a guitar-focused transcription model on clips where background music overlaps the performance. General source-separation stems are not guaranteed to isolate guitar from every mix.
-4. Build a small evaluation set with labeled examples for silence/background-only, single-note playing, chords, and noisy recordings. Compare false detections and missed notes before tuning the model further.
-5. After note detections are reasonably reliable, improve fret-position continuity and add beat/measure quantization. Better tab rendering cannot correct incorrect pitch detections.
-
-### Vision-assisted guitar analysis
-
-A vision model can complement audio transcription, but a general video/vision-language model should not be expected to read exact strings and frets reliably. Fretboard details are small, fingers occlude strings, and camera perspective/resolution vary.
-
-Recommended hybrid design:
-
-1. Preserve audio/video timestamps when decoding. A coarse video pass (for example, a few frames per second) finds likely playing regions, checks that the neck and hands are visible, and lets the user exclude intros or background-only parts.
-2. Run source separation and audio transcription only on the chosen region. Audio provides note pitches, onset times, durations, and possible chord groups.
-3. For each audio note/chord onset, inspect nearby source frames at the original frame resolution. A fixed frame every 0.5 seconds is useful for coarse activity but can miss fast notes; use audio event timestamps to trigger the detailed visual check.
-4. Detect the guitar neck, string lines, fret boundaries, and fretting-hand/fingertip landmarks. Calibrate/project the fretboard geometry into image coordinates, then estimate which string/fret each fingertip presses. Use audio pitch plus tuning to rule out visually plausible but acoustically impossible candidates.
-5. Track candidates across time, preferring a coherent hand position and plausible transitions. Return visual, audio, and combined confidence separately; retain low-confidence notes for user review/correction.
-
-Possible implementation pieces include an object detector for guitar/neck regions, a hand-landmark model for finger locations, and OpenCV geometry for strings/fret boundaries. A general multimodal vision model can help with coarse activity or visibility judgments, but exact fretboard localization should be evaluated with a purpose-built CV pipeline. Camera angle, motion blur, low resolution, and fingers covering strings can make exact detection impossible for some clips.
-
-Detecting **which finger** (index/middle/ring/pinky) is pressing is possible only when the hand is large and clear enough, and is harder than detecting the string/fret. Finger identity is not required to write a tab; it is an optional later feature for fingering suggestions. Do not invent a finger label when the image is occluded—return unknown/low confidence.
-
-Jev is not part of pixel/frame analysis. A vision pipeline would first turn frames into structured observations (for example, candidate fret positions, hand visibility, and confidence). Jev could then classify or score those text/structured candidates against a predefined schema, if evaluation shows it helps. It cannot itself find notes, strings, frets, or fingers from a video frame.
-
-### Recommended milestones
-
-1. **Make audio events trustworthy:** compare the original mix and Demucs guitar stem, add a user-selectable analysis range and confidence controls, and evaluate against a few labeled clips.
-2. **Add video-assisted region selection:** show coarse “playing likely / uncertain” time ranges and let the user confirm the region before transcription.
-3. **Prototype visual fretboard localization:** start with a short, close, well-lit clip; detect the neck/strings/frets and hand landmarks; overlay candidate positions for manual verification.
-4. **Fuse candidates:** match detected audio pitches to feasible visible string/fret positions, with continuity and confidence, and allow correction.
-5. **Add finger guidance only after fret/string accuracy is measured.**
-
-Example outputs for a vision pass could include `playing_visible`, `fretting_hand_visible`, `picking_hand_active`, `neck_visible`, and a confidence score, all tied to a video timestamp. A later Jev call could classify a structured text representation of these signals or rank a finite set of already-generated candidates. Jev cannot receive the image pixels itself.
-
-A Gemini-class multimodal model is appropriate for coarse questions such as “does the person appear to be playing during this time range?” or for helping a user mark the performance region. It is not the first choice for frame-accurate note transcription or exact fret/string classification. Use selected frames with timestamps rather than asking a general model to generate a full tab from the whole clip. The proposed sample rates are starting points to evaluate, not fixed requirements; adjust for the clip's frame rate and note speed.
-
-**Jev is different from a vision-language model.** TypeSafe describes Jev as a structured classification/decision model: it receives text plus questions and returns predefined outputs such as yes/no, a choice, or a score with probabilities. It does not accept raw video frames or images, and it does not generate free-form text. Jev could potentially classify text features produced by a separate vision/audio pipeline (for example, activity labels and timestamps), but it cannot itself inspect the guitar video. Verify current modalities and API details against the [TypeSafe Jev announcement](https://typesafe.ai/blog/introducing-system-one-models-and-jev) and [TypeSafe documentation](https://docs.typesafe.ai/introduction).
-
-## Alternative approaches to evaluate later
-
-- **Crepe:** useful for monophonic pitch tracking, but less suitable for complete chord detection.
-- **Demucs:** currently integrated as an experimental guitar-stem preprocessing step. The upstream repository is archived; the six-stem model's guitar output can have bleed and artifacts, so compare on an evaluation set before relying on it.
-- **A specialized transcription model:** suitable when Basic Pitch accuracy is insufficient for a specific guitar style.
-- **A commercial transcription API:** faster to prototype with but should be isolated behind a backend adapter so it can be replaced.
-
-Do not use Docling for transcription. Docling processes documents; it does not convert guitar audio to notes.
-
-## API notes
-
-- CORS currently allows the Vite development origins `http://localhost:5173` and `http://127.0.0.1:5173`.
-- The upload API is under `POST /api/uploads`.
-- The API health check is under `GET /api/health`.
-- Uploaded files should be stored in object storage in production rather than only on a local server filesystem.
-
-## Tablature workspace and playback
-
-The tablature panel takes roughly 55% of the desktop workspace; the video and chat panels retain narrower columns. The tab staff is divided into compact eight-second timeline rows rather than one long horizontal strip. Each row has its own time ruler, and the red playhead appears in the row matching the video's current playback/seek position. Scroll vertically for additional rows; horizontal scrolling remains available at narrower widths. These are time windows, not musical measures, because tempo and beat quantization are not implemented yet.
-
-## Implemented multimodal analysis workflow
-
-### Compare calibrated local vision
-
-Use a standard-tuned guitar clip. Pause on a clear frame with visible fret wires or inlays, click **Calibrate fretboard**, choose two visible wires that bracket the playing area, and mark where the outer strings cross them in the order shown. Select **Nut** as the start wire when it is visible. In the tablature panel, set **Vision** to **Track fretboard** or **Fixed calibration**, enter the BPM if known, then click **Analyze with audio + vision**.
-
-OpenCV follows features on the marked fretboard and attempts to match the original calibration at the start of the range and at each measure boundary. The results report tracked frames and successful anchor matches. Frames where the tracker loses the neck contribute no visual evidence to string and fret assignment.
-
-MediaPipe runs once per selected frame near the detected audio onsets. The local pass scores pitch-compatible positions near the tracked fingertips and estimates the index finger’s fret. It uses other visible fingertips when the index is lifted or crosses the rest of the hand. A Viterbi-style beam search uses agreement across nearby frames, the hand’s estimated reach and movement, and the audio-based positions. It prefers comfortable chord shapes and distinct strings at simultaneous attacks. A colored note flags a pitch whose selected fingering falls outside the estimated reach. Hover to see the hand estimate. **Show audio-only positions** displays the original positions for the same note events. This comparison runs locally and leaves the saved transcription available to chat.
-
-For each note, the search also scores the four fingertips in the low E/A, D/G, and B/high e zones. It considers fingertip movement near the attack and uses one finger per fret from the index as a preference. Hover over a tab note to see its zone and any likely finger. Ambiguous fingers and open strings have no finger label.
-
-### Configured vision provider
-
-The current application supports an explicit analysis range:
-
-1. Upload a video and select a start/end section in the source panel.
-2. Click **Analyze selected range**.
-3. FFmpeg trims the extracted stereo audio to that range.
-4. Demucs can separate a guitar stem, with fallback to the trimmed original audio.
-5. Basic Pitch detects notes in the trimmed segment.
-6. Detected timestamps are offset back onto the full-video timeline.
-7. MediaPipe analyzes frames near note onsets and coarse frames every 0.5 seconds.
-8. Jev-Vision can classify pitch-compatible string/fret candidates at each detected note frame.
-9. The API returns audio, visual, and combined confidence fields, coarse hand/neck observations, Jev choices, probabilities, and answer mass.
-
-Jev-Vision is optional and lazy-loaded on Apple Silicon through MPS. Set `JEV_VISION_ENABLED=false` to disable it. It receives no more than the six standard-tuning candidates compatible with each detected MIDI pitch plus a no-visible-candidate option. A visual position overrides the Basic Pitch string/fret mapping only when Jev confidence and answer mass meet thresholds. Otherwise the original mapping remains in place and uncertainty is reported.
-
-The vision pass reports hand visibility, fretting-hand plausibility, neck-edge visibility, and visual confidence. Exact fret/string accuracy still requires real labeled guitar-frame evaluation and is not guaranteed by a general VQA-style checkpoint.
-
-Results are cached by `(job_id, start_seconds, end_seconds)` in SQLite. The original video and extracted WAV remain stored for frame analysis and evaluation.
-
-Gemini cloud vision is optional and activates when `GEMINI_API_KEY` is set in `backend/.env`. Copy `backend/.env.example`, add the key, and optionally set `GEMINI_MODEL` (default: `gemini-2.5-flash-lite`). Gemini receives a frame, detected MIDI pitch, and pitch-compatible string/fret candidates; it returns strict JSON including optional finger identity and confidence. If no key is configured or Gemini fails, MediaPipe/Jev remain as fallbacks.
-
-Set `VISION_PROVIDER=gemini`, `openai`, `jev`, `local`, or `off` in `backend/.env`. Gemini uses `GEMINI_API_KEY` and `GEMINI_MODEL`; OpenAI uses `OPENAI_API_KEY` and `OPENAI_MODEL`. The default inexpensive OpenAI model is configured as `gpt-6-luna`, subject to current provider availability. Cloud providers fall back to unavailable/local handling if their key or request fails.
+- GuitarProFX weights by Pedroza, Abreu, Corey, and Roman. The bundled [ONNX export by cstr](https://huggingface.co/cstr/tabcnn-onnx) is CC BY 4.0. [GuitarProFX paper](https://www.dafx.de/paper-archive/2024/papers/DAFx24_paper_99.pdf)
+- Original TabCNN by Wiggins and Kim. [TabCNN paper](https://zenodo.org/records/3527800)
+- [Spotify Basic Pitch](https://github.com/spotify/basic-pitch) · [Meta Demucs](https://github.com/facebookresearch/demucs) · [Google MediaPipe Hand Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/hand_landmarker)
+- Evaluation datasets. [EGSet12](https://zenodo.org/records/11406378) · [Guitar-TECHS](https://zenodo.org/records/14963133) · [GuiFiR-Vid](https://github.com/kmu-ee-ailab/guifir_dataset)
