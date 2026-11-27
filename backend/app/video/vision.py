@@ -7,9 +7,11 @@ import numpy as np
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision as mp_vision
 
-from app.transcription.gemini_vision import GeminiVisionService
-from app.transcription.openai_vision import OpenAIVisionService
-from app.transcription.jev_vision import JevVisionService
+from app.video.calibrated_vision import analyze_calibrated
+from app.video.fretboard import Fretboard, FretboardCalibration
+from app.video.gemini_vision import GeminiVisionService
+from app.video.jev_vision import JevVisionService
+from app.video.openai_vision import OpenAIVisionService
 
 
 class GuitarVisionService:
@@ -25,11 +27,13 @@ class GuitarVisionService:
         end_seconds: float,
         notes: list[dict],
         bpm: int | None = None,
+        calibration: FretboardCalibration | None = None,
     ) -> tuple[list[dict], list[dict]]:
         if not video_path.exists():
             return notes, []
 
-        landmarker = self._create_landmarker()
+        mode = mp_vision.RunningMode.VIDEO if calibration else mp_vision.RunningMode.IMAGE
+        landmarker = self._create_landmarker(mode)
         if landmarker is None:
             enhanced = [dict(note, vision_status="unavailable", visual_confidence=0.0) for note in notes]
             return enhanced, []
@@ -38,6 +42,16 @@ class GuitarVisionService:
         if not capture.isOpened():
             landmarker.close()
             return [dict(note, vision_status="unavailable", visual_confidence=0.0) for note in notes], []
+
+        if calibration is not None:
+            try:
+                return analyze_calibrated(
+                    capture, landmarker, Fretboard(calibration), start_seconds, end_seconds,
+                    notes, self.COARSE_INTERVAL_SECONDS, bpm=bpm or 120,
+                )
+            finally:
+                capture.release()
+                landmarker.close()
 
         fps = capture.get(cv2.CAP_PROP_FPS) or 30.0
         coarse = []
@@ -142,13 +156,13 @@ class GuitarVisionService:
         landmarker.close()
         return enhanced_notes, coarse
 
-    def _create_landmarker(self):
+    def _create_landmarker(self, mode: mp_vision.RunningMode):
         if not self.model_path.exists():
             return None
         base_options = python.BaseOptions(model_asset_path=str(self.model_path))
         options = mp_vision.HandLandmarkerOptions(
             base_options=base_options,
-            running_mode=mp_vision.RunningMode.IMAGE,
+            running_mode=mode,
             num_hands=2,
             min_hand_detection_confidence=0.5,
             min_hand_presence_confidence=0.5,

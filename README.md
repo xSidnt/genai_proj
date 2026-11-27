@@ -20,14 +20,17 @@ genai_proj/
 ├── frontend/                 # React + TypeScript + Vite
 ├── backend/
 │   ├── app/
-│   │   ├── upload/           # Upload API, service, repository, and models
+│   │   ├── audio/            # WAV extraction and trimming, Demucs, note detection, BPM
+│   │   ├── video/            # Video metadata, frame analysis, and vision providers
+│   │   ├── transcription/    # API, audio/video orchestration, result models, and SQLite
+│   │   ├── upload/           # Upload API, validation, and job persistence
+│   │   ├── chat/             # Questions about saved transcription results
 │   │   └── main.py           # FastAPI application composition
 │   ├── data/                 # SQLite database and application state
 │   ├── storage/
 │   │   ├── uploads/          # Original uploaded videos
 │   │   ├── audio/            # Extracted WAV audio files
-│   │   └── tmp/              # Temporary processing files
-│   ├── tests/                # Backend tests
+│   │   └── models/           # MediaPipe hand landmark model
 │   ├── pyproject.toml
 │   └── uv.lock
 └── README.md
@@ -36,8 +39,9 @@ genai_proj/
 This is a modular monolith:
 
 - The frontend and backend are separate applications inside one repository.
-- Backend features own their API route, business logic, data models, and persistence access.
-- Runtime files such as videos, WAV files, databases, virtual environments, environment variables, or secrets.
+- Upload calls into `video/` to read metadata and `audio/` to extract a WAV.
+- The transcription API runs the audio analysis, passes timed notes to the video analysis, and saves the combined result for the tab renderer and chat.
+- Uploaded videos, generated WAV files, databases, virtual environments, and secrets stay out of version control.
 
 ## Tech stack
 
@@ -230,6 +234,58 @@ That JSON can be rendered in React as tablature and then used as context for the
 
 ## Transcription strategy
 
+### Choose a note model and audio input
+
+**Electric Guitar (TabCNN)** estimates frets directly from audio. It is the website default and runs locally. **Basic Pitch + playable fingering** detects pitches and uses a bounded search across the phrase to favor smaller hand movements and playable chord shapes. Both models support **Original audio** and **Isolated guitar** as independent inputs. With TabCNN, Basic Pitch also supplies evidence for repeated attacks and possible bends or slides. The tab and chat treat technique hints as estimates.
+
+The **Solo electric guitar** preset starts with TabCNN, original audio, melody and chords, and vision off. **Pitch and timing** uses Basic Pitch on the same input. **Single-note lead with backing** uses TabCNN, the isolated guitar stem, single-note lead, and fixed calibration. Mark the fretboard to run either calibration mode. Select **Track fretboard** when you want the app to follow the marked area as the guitar moves.
+
+The bundled `tabcnn-gpfx.onnx` is the [CC BY 4.0 ONNX export by cstr](https://huggingface.co/cstr/tabcnn-onnx) of the GuitarProFX TabCNN weights published by Hegel Pedroza, Wallace Abreu, Ryan Corey, and Iran Roman with [EGSet12](https://zenodo.org/records/11406378). TabCNN was introduced by Andrew Wiggins and Youngmoo Kim. The training and evaluation resources include [GuitarSet](https://zenodo.org/records/3371780) by Qingyang Xi, Rachel M. Bittner, Johan Pauwels, Xuzhou Ye, and Juan Pablo Bello. Fretboard search and technique rules draw on [midi2tab](https://github.com/stephenmthomas/midi2tab) and [tabgen](https://github.com/aguilasa/tabgen).
+
+Choose **Single-note lead** for a passage with one melody note at a time. It keeps the strongest detected attack in each sixteenth-note slot and leaves empty slots as rests. Set the BPM before analyzing when you have a reference tempo. **Melody and chords** keeps the full polyphonic output.
+
+### Measure audio transcription quality
+
+Download matching `.wav` and `.jams` files from [EGSet12](https://zenodo.org/records/11406378) by Pedroza, Abreu, Corey, and Roman into the same directory. From `backend/`, run:
+
+```bash
+.venv/bin/python -m scripts.benchmark_egset12 /path/to/EGSet12 --include-isolated
+```
+
+The script reports note-level F1 for pitch and onset within 50 ms, then for pitch, onset, and exact string/fret. F1 counts both missed notes and extra detections. It scores each model with both arrangements and includes both audio inputs when `--include-isolated` is set. Lead mode uses the detected BPM, with 120 as a fallback.
+
+Results across all 12 EGSet12 recordings and 1,567 reference notes used the ONNX runtime for Basic Pitch. The recordings contain solo electric guitar and provide audio-only reference labels. EGSet12 was also used to evaluate the bundled TabCNN checkpoint in its original study. [EGSet12 and model weights](https://zenodo.org/records/11406378)
+
+| Model | Audio | Arrangement | Pitch F1 | Tab F1 | Total time |
+| --- | --- | --- | ---: | ---: | ---: |
+| Basic Pitch | Original | Melody and chords | **76.4%** | 42.4% | 7.5 s |
+| Basic Pitch | Original | Single-note lead | 60.5% | 30.0% | 7.5 s |
+| TabCNN | Original | Melody and chords | 58.6% | **42.5%** | 16.2 s |
+| TabCNN | Original | Single-note lead | 49.4% | 34.1% | 16.2 s |
+| Basic Pitch | Isolated guitar | Melody and chords | 71.3% | 39.0% | 114.4 s |
+| Basic Pitch | Isolated guitar | Single-note lead | 54.8% | 25.8% | 114.3 s |
+| TabCNN | Isolated guitar | Melody and chords | 54.6% | 37.3% | 122.7 s |
+| TabCNN | Isolated guitar | Single-note lead | 44.4% | 28.1% | 122.7 s |
+
+### Compare local vision on the Realiti opening
+
+An eight-second analysis was scored against the first 16 notes of the supplied Songsterr reference. Reference timing used the score's 115 BPM, an estimated first onset of 0.848 seconds, and a 65 ms onset tolerance. The table uses the app's estimated playback grid of 117 BPM. Fixed and tracked vision used the same manually marked frame around 1.03 seconds and the same fret wires, 2 and 12. Audio detections were held constant across the three vision modes. This is one passage from one performance. Timing, calibration, and backing-track balance can change the results.
+
+| Model | Audio | Arrangement | Pitch F1 | Tab F1, vision off | Tab F1, fixed | Tab F1, tracked |
+| --- | --- | --- | ---: | ---: | ---: | ---: |
+| Basic Pitch | Original | Melody and chords | 46.7% | 0.0% | 0.0% | 0.0% |
+| Basic Pitch | Original | Single-note lead | 46.2% | 0.0% | 0.0% | 0.0% |
+| TabCNN | Original | Melody and chords | 9.1% | 0.0% | 0.0% | 0.0% |
+| TabCNN | Original | Single-note lead | 0.0% | 0.0% | 0.0% | 0.0% |
+| Basic Pitch | Isolated guitar | Melody and chords | 78.6% | 0.0% | 0.0% | 0.0% |
+| Basic Pitch | Isolated guitar | Single-note lead | **81.5%** | 0.0% | 0.0% | 0.0% |
+| TabCNN | Isolated guitar | Melody and chords | 68.8% | 25.0% | 37.5% | 37.5% |
+| TabCNN | Isolated guitar | Single-note lead | 78.6% | 28.6% | **57.1%** | **57.1%** |
+
+The best Realiti lead settings matched eight reference string/fret positions with either calibration mode, up from four with vision off. A second sweep at the score's 115 BPM matched six positions with either calibration mode. At 117 BPM fixed calibration added about 1.0 second and tracking added about 2.1 seconds. Tracked vision matched all four measure anchors in the analyzed range. The vision pass adjusts fingering for detected notes and keeps their pitches and onsets.
+
+These tables document the settings sweep before hand-position constraints were added. With the same Realiti opening settings at 117 BPM, a follow-up run matched 11 of the first 16 reference positions with either calibration mode.
+
 ### Implemented MVP model: Basic Pitch
 
 Basic Pitch and Demucs are installed in `backend/.venv` under Python 3.11.
@@ -397,6 +453,16 @@ Do not use Docling for transcription. Docling processes documents; it does not c
 The tablature panel takes roughly 55% of the desktop workspace; the video and chat panels retain narrower columns. The tab staff is divided into compact eight-second timeline rows rather than one long horizontal strip. Each row has its own time ruler, and the red playhead appears in the row matching the video's current playback/seek position. Scroll vertically for additional rows; horizontal scrolling remains available at narrower widths. These are time windows, not musical measures, because tempo and beat quantization are not implemented yet.
 
 ## Implemented multimodal analysis workflow
+
+### Compare calibrated local vision
+
+Use a standard-tuned guitar clip. Pause on a clear frame with visible fret wires or inlays, click **Calibrate fretboard**, choose two visible wires that bracket the playing area, and mark where the outer strings cross them in the order shown. Select **Nut** as the start wire when it is visible. In the tablature panel, set **Vision** to **Track fretboard** or **Fixed calibration**, enter the BPM if known, then click **Analyze with audio + vision**.
+
+OpenCV follows features on the marked fretboard and attempts to match the original calibration at the start of the range and at each measure boundary. The results report tracked frames and successful anchor matches. Frames where the tracker loses the neck contribute no visual evidence to string and fret assignment.
+
+MediaPipe runs once per selected frame near the detected audio onsets. The local pass scores pitch-compatible positions near the tracked fingertips and estimates the index finger’s fret. It uses other visible fingertips when the index is lifted or crosses the rest of the hand. A Viterbi-style beam search uses agreement across nearby frames, the hand’s estimated reach and movement, and the audio-based positions. It prefers comfortable chord shapes and distinct strings at simultaneous attacks. A colored note flags a pitch whose selected fingering falls outside the estimated reach. Hover to see the hand estimate. **Show audio-only positions** displays the original positions for the same note events. This comparison runs locally and leaves the saved transcription available to chat.
+
+### Configured vision provider
 
 The current application supports an explicit analysis range:
 

@@ -28,6 +28,9 @@ def _compact_notes(notes: list[dict]) -> list[dict]:
             "duration_seconds": note.get("duration_seconds"),
             "confidence": note.get("confidence"),
             "finger": note.get("finger", "unknown"),
+            "possible_technique": note.get("technique"),
+            "technique_target_fret": note.get("technique_target_fret"),
+            "bend_semitones": note.get("bend_semitones"),
         }
         for note in notes
     ]
@@ -84,7 +87,8 @@ def _chat_openai(message: str, context: dict) -> ChatResponse:
             "You are a guitar-practice assistant for the CroissantDough application. "
             "Answer using only the supplied transcription data. Do not invent notes, "
             "timings, chords, or technique that are absent. If evidence is uncertain, "
-            "say it is uncertain and explain what is known. Keep answers practical and concise."
+            "say it is uncertain and explain what is known. Technique hints are estimates. "
+            "Keep answers practical and concise."
         )
         response = client.responses.create(
             model=model,
@@ -117,7 +121,7 @@ def _chat_gemini(message: str, context: dict) -> ChatResponse:
         model = os.getenv("GEMINI_CHAT_MODEL", os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite"))
         system = (
             "You are a guitar-practice assistant. Use only the supplied transcription data. "
-            "Do not invent notes, timings, chords, or technique. Mark uncertainty clearly."
+            "Do not invent notes, timings, chords, or technique. Technique hints are estimates. Mark uncertainty clearly."
         )
         response = client.models.generate_content(
             model=model,

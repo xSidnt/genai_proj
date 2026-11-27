@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from basic_pitch.inference import predict
+from basic_pitch.constants import CONTOURS_BINS_PER_SEMITONE
 
 
 class TranscriptionError(RuntimeError):
@@ -27,7 +28,7 @@ class TranscriptionService:
             raise TranscriptionError("Basic Pitch could not process the audio") from error
 
         notes = []
-        for start, end, midi, confidence, _bend_data in note_events:
+        for start, end, midi, confidence, bend_data in note_events:
             midi_number = int(midi)
             guitar_position = self.map_to_guitar(midi_number)
             if guitar_position is None:
@@ -43,6 +44,8 @@ class TranscriptionService:
                     "start_seconds": round(float(start), 3),
                     "duration_seconds": round(max(float(end) - float(start), 0), 3),
                     "confidence": round(float(confidence), 3),
+                    "bend_curve": [float(value) / CONTOURS_BINS_PER_SEMITONE for value in bend_data]
+                    if bend_data is not None else [],
                 }
             )
 

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react'
+import FretboardCalibration, { type Calibration } from './FretboardCalibration'
 
 interface UploadResult {
   job_id: string
@@ -16,6 +17,7 @@ interface VideoPanelProps {
   startSeconds: number
   endSeconds: number
   onRangeChange: (startSeconds: number, endSeconds: number) => void
+  onCalibrationChange: (calibration: Calibration | null) => void
 }
 
 export default function VideoPanel({
@@ -24,12 +26,14 @@ export default function VideoPanel({
   startSeconds,
   endSeconds,
   onRangeChange,
+  onCalibrationChange,
 }: VideoPanelProps) {
   const [videoFile, setVideoFile] = useState<File | null>(null)
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [uploadStatus, setUploadStatus] = useState('No video')
   const [uploadResult, setUploadResult] = useState<UploadResult | null>(null)
   const videoUrlRef = useRef<string | null>(null)
+  const videoRef = useRef<HTMLVideoElement>(null)
 
   useEffect(() => {
     return () => {
@@ -41,6 +45,7 @@ export default function VideoPanel({
     const file = event.target.files?.[0]
     if (!file) return
 
+    onCalibrationChange(null)
     if (videoUrlRef.current) URL.revokeObjectURL(videoUrlRef.current)
     const nextVideoUrl = URL.createObjectURL(file)
     videoUrlRef.current = nextVideoUrl
@@ -59,6 +64,7 @@ export default function VideoPanel({
       })
 
       const result = await response.json()
+      if (nextVideoUrl !== videoUrlRef.current) return
       if (!response.ok) {
         throw new Error(result.detail || 'Upload failed')
       }
@@ -71,6 +77,7 @@ export default function VideoPanel({
       )
       onRangeChange(0, (result as UploadResult).duration_seconds)
     } catch (error) {
+      if (nextVideoUrl !== videoUrlRef.current) return
       setUploadStatus('Upload failed')
       setUploadResult(null)
       window.alert(error instanceof Error ? error.message : 'Upload failed')
@@ -90,6 +97,7 @@ export default function VideoPanel({
       <div className="video-stage">
         {videoUrl ? (
           <video
+            ref={videoRef}
             className="video-preview"
             src={videoUrl}
             controls
@@ -158,6 +166,7 @@ export default function VideoPanel({
             {uploadResult.duration_seconds.toFixed(1)}s · {uploadResult.width ?? '?'}×
             {uploadResult.height ?? '?'} · {uploadResult.frame_rate?.toFixed(2) ?? '?'} fps
           </p>
+          <FretboardCalibration videoRef={videoRef} onChange={onCalibrationChange} />
         </>
       ) : (
         <p className="helper-text">

@@ -14,6 +14,7 @@ class TranscriptionRepository:
 
     def _create_tables(self) -> None:
         with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
             legacy_columns = {
                 row[1]
                 for row in connection.execute("PRAGMA table_info(transcription_results)")
@@ -36,6 +37,8 @@ class TranscriptionRepository:
                     status TEXT NOT NULL,
                     tuning TEXT NOT NULL,
                     tempo_bpm INTEGER,
+                    tempo_source TEXT,
+                    analysis_profile TEXT,
                     notes_json TEXT NOT NULL,
                     audio_source TEXT NOT NULL DEFAULT 'original',
                     video_observations_json TEXT NOT NULL DEFAULT '[]',
@@ -58,6 +61,11 @@ class TranscriptionRepository:
                         """
                     )
                 connection.execute("DROP TABLE transcription_results_legacy")
+            elif legacy_columns:
+                if "tempo_source" not in legacy_columns:
+                    connection.execute("ALTER TABLE transcription_results ADD COLUMN tempo_source TEXT")
+                if "analysis_profile" not in legacy_columns:
+                    connection.execute("ALTER TABLE transcription_results ADD COLUMN analysis_profile TEXT")
 
     def get_upload_media(self, job_id: str) -> tuple[str, str, float] | None:
         with self._connect() as connection:
@@ -79,18 +87,22 @@ class TranscriptionRepository:
         notes: list[dict],
         audio_source: str,
         video_observations: list[dict],
+        tempo_source: str | None = None,
+        analysis_profile: str | None = None,
     ) -> None:
         with self._connect() as connection:
             connection.execute(
                 """
                 INSERT INTO transcription_results
-                (job_id, start_seconds, end_seconds, status, tuning, tempo_bpm,
+                (job_id, start_seconds, end_seconds, status, tuning, tempo_bpm, tempo_source, analysis_profile,
                  notes_json, audio_source, video_observations_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(job_id, start_seconds, end_seconds) DO UPDATE SET
                     status = excluded.status,
                     tuning = excluded.tuning,
                     tempo_bpm = excluded.tempo_bpm,
+                    tempo_source = excluded.tempo_source,
+                    analysis_profile = excluded.analysis_profile,
                     notes_json = excluded.notes_json,
                     audio_source = excluded.audio_source,
                     video_observations_json = excluded.video_observations_json
@@ -102,6 +114,8 @@ class TranscriptionRepository:
                     status,
                     json.dumps(tuning),
                     tempo_bpm,
+                    tempo_source,
+                    analysis_profile,
                     json.dumps(notes),
                     audio_source,
                     json.dumps(video_observations),
@@ -113,7 +127,7 @@ class TranscriptionRepository:
             row = connection.execute(
                 """
                 SELECT status, tuning, tempo_bpm, notes_json, audio_source,
-                       video_observations_json
+                       video_observations_json, tempo_source, analysis_profile
                 FROM transcription_results
                 WHERE job_id = ? AND start_seconds = ? AND end_seconds = ?
                 """,
@@ -130,4 +144,6 @@ class TranscriptionRepository:
             "notes": json.loads(row[3]),
             "audio_source": row[4],
             "video_observations": json.loads(row[5]),
+            "tempo_source": row[6],
+            "analysis_profile": row[7],
         }

@@ -1,11 +1,20 @@
+import { useEffect, useRef } from 'react'
+
 interface TabNote {
   pitch: string
   midi: number
   string: number
   fret: number
   start_seconds: number
+  grid_seconds?: number | null
   duration_seconds: number
   confidence: number
+  technique?: 'bend' | 'slide' | null
+  technique_target_fret?: number | null
+  bend_semitones?: number | null
+  visual_status?: string
+  visual_index_fret?: number | null
+  visual_hand_fret?: number | null
 }
 
 interface GuitarTabStaffProps {
@@ -35,25 +44,45 @@ function secondsToSixteenth(seconds: number, bpm: number) {
   return seconds / sixteenthDuration
 }
 
+function noteSubdivision(note: TabNote, bpm: number) {
+  return note.grid_seconds == null
+    ? secondsToSixteenth(note.start_seconds, bpm)
+    : Math.round(secondsToSixteenth(note.grid_seconds, bpm))
+}
+
 export default function GuitarTabStaff({
   notes,
   playbackTime,
   durationSeconds,
   bpm,
 }: GuitarTabStaffProps) {
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const activeMeasureRef = useRef<HTMLElement>(null)
   const duration = Math.max(durationSeconds, 1)
   const measureSeconds = 240 / bpm
   const measureCount = Math.max(1, Math.ceil(duration / measureSeconds))
   const playbackSubdivision = secondsToSixteenth(playbackTime, bpm)
   const activeMeasure = Math.min(Math.floor(playbackSubdivision / SUBDIVISIONS_PER_MEASURE), measureCount - 1)
 
+  useEffect(() => {
+    const scroll = scrollRef.current
+    const measure = activeMeasureRef.current
+    if (!scroll || !measure) return
+
+    const visible = scroll.getBoundingClientRect()
+    const bounds = measure.getBoundingClientRect()
+    if (bounds.top < visible.top || bounds.bottom > visible.bottom) {
+      scroll.scrollTop += bounds.top - visible.top
+    }
+  }, [activeMeasure])
+
   return (
-    <div className="tab-scroll" aria-label="Scrollable BPM-based guitar tablature">
+    <div ref={scrollRef} className="tab-scroll" aria-label="Scrollable BPM-based guitar tablature">
       {Array.from({ length: measureCount }, (_, measureIndex) => {
         const measureStartSubdivision = measureIndex * SUBDIVISIONS_PER_MEASURE
         const measureEndSubdivision = measureStartSubdivision + SUBDIVISIONS_PER_MEASURE
         const rowNotes = notes.filter((note) => {
-          const subdivision = secondsToSixteenth(note.start_seconds, bpm)
+          const subdivision = noteSubdivision(note, bpm)
           return subdivision >= measureStartSubdivision && subdivision < measureEndSubdivision
         })
         const isActive = measureIndex === activeMeasure
@@ -62,6 +91,7 @@ export default function GuitarTabStaff({
 
         return (
           <section
+            ref={isActive ? activeMeasureRef : undefined}
             className={`tab-segment${isActive ? ' tab-segment-active' : ''}`}
             key={measureIndex}
             aria-label={`Measure ${measureIndex + 1}`}
@@ -114,22 +144,33 @@ export default function GuitarTabStaff({
                   const stringRow = STRINGS.findIndex((string) => string.number === note.string)
                   if (stringRow < 0) return null
 
-                  const exactSubdivision = secondsToSixteenth(note.start_seconds, bpm)
-                  const snappedSubdivision = Math.round(exactSubdivision)
-                  const positionInMeasure = snappedSubdivision - measureStartSubdivision
+                  const positionInMeasure = noteSubdivision(note, bpm) - measureStartSubdivision
+                  const technique = note.technique === 'bend'
+                    ? `possible bend: ${note.bend_semitones} semitone(s)`
+                    : note.technique === 'slide' ? `possible slide to fret ${note.technique_target_fret}` : ''
+                  const fingering = {
+                    'calibrated-visible': ', supported by fingertip evidence',
+                    'calibrated-hand': ', chosen using hand position',
+                    'calibrated-conflict': ', detected pitch conflicts with hand position',
+                    'calibrated-inferred': ', chosen by phrase context',
+                  }[note.visual_status ?? ''] ?? ''
+                  const handPosition = note.visual_index_fret != null
+                    ? `, index finger near fret ${note.visual_index_fret.toFixed(1)}`
+                    : note.visual_hand_fret != null ? `, hand near fret ${note.visual_hand_fret.toFixed(1)}` : ''
 
                   return (
                     <span
-                      className="tab-note"
+                      className={note.visual_status === 'calibrated-conflict' ? 'tab-note tab-note-conflict' : 'tab-note'}
                       key={`${note.midi}-${note.string}-${note.start_seconds}-${index}`}
                       style={{
                         left: `${LEFT_GUTTER + positionInMeasure * PIXELS_PER_SUBDIVISION}px`,
                         top: `${stringRow * LANE_HEIGHT + LANE_HEIGHT / 2}px`,
                         opacity: Math.max(0.48, Math.min(1, note.confidence)),
                       }}
-                      title={`${note.pitch}, string ${note.string}, fret ${note.fret}, measure ${measureIndex + 1}, sixteenth ${positionInMeasure + 1}, confidence ${(note.confidence * 100).toFixed(0)}%`}
+                      title={`${note.pitch}, string ${note.string}, fret ${note.fret}, ${note.start_seconds.toFixed(2)}s, confidence ${(note.confidence * 100).toFixed(0)}%${technique ? `, ${technique}` : ''}${fingering}${handPosition}`}
                     >
                       {note.fret}
+                      {note.technique === 'bend' ? 'b' : note.technique === 'slide' ? '/' : ''}
                     </span>
                   )
                 })}

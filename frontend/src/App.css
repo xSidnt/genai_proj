@@ -408,6 +408,11 @@
   text-align: center;
 }
 
+.tab-note-conflict {
+  border-color: #91420d;
+  background: #ac500f;
+}
+
 .tab-string-names {
   padding: 2px 12px 0 38px;
   color: var(--text-muted);
@@ -565,6 +570,57 @@
   opacity: 0.55;
 }
 
+.fretboard-calibration,
+.vision-comparison {
+  display: grid;
+  gap: 8px;
+  margin-block: 12px;
+}
+
+.fretboard-calibration label,
+.vision-comparison label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.fretboard-frame {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: crosshair;
+}
+
+.fretboard-frame img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.fretboard-area {
+  position: absolute;
+  inset: 0;
+  background: rgba(173, 130, 255, 0.36);
+  pointer-events: none;
+}
+
+.fretboard-point {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: #fff;
+  color: #25163e;
+  font-size: 11px;
+  pointer-events: none;
+}
+
 @media (max-width: 1100px) {
   .app-shell {
     padding-right: 22px;
@@ -610,6 +666,29 @@
   .video-stage {
     min-height: 220px;
   }
+}
+
+.transcription-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-bottom: 12px;
+}
+
+.transcription-options label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.transcription-options select {
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: white;
+  color: var(--text-strong);
+  font: inherit;
 }
 
 .bpm-controls {

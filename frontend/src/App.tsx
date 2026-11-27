@@ -2,6 +2,7 @@ import { useState } from 'react'
 import VideoPanel from './components/VideoPanel'
 import TabsPanel from './components/TabsPanel'
 import ChatPanel from './components/ChatPanel'
+import type { Calibration } from './components/FretboardCalibration'
 import './App.css'
 
 function App() {
@@ -10,6 +11,7 @@ function App() {
   const [playbackTime, setPlaybackTime] = useState(0)
   const [startSeconds, setStartSeconds] = useState(0)
   const [endSeconds, setEndSeconds] = useState(0)
+  const [calibration, setCalibration] = useState<Calibration | null>(null)
 
   return (
     <main className="app-shell">
@@ -40,6 +42,7 @@ function App() {
 
       <div className="workspace">
         <VideoPanel
+          onCalibrationChange={setCalibration}
           onPlaybackTimeChange={setPlaybackTime}
           startSeconds={startSeconds}
           endSeconds={endSeconds}
@@ -57,6 +60,7 @@ function App() {
           }}
         />
         <TabsPanel
+          calibration={calibration}
           jobId={jobId}
           playbackTime={playbackTime}
           videoDuration={videoDuration}
