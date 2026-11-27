@@ -5,6 +5,7 @@ import mediapipe as mp
 import numpy as np
 
 from app.audio.fingering import FretEvidence, HandPosition, optimize_fingering
+from app.video.finger_evidence import assign_fingers, score_fingers
 from app.video.fretboard import Fretboard
 from app.video.fretboard_tracking import FretboardTracker
 
@@ -108,6 +109,7 @@ def analyze_calibrated(
     cached_scores: dict[tuple[int, int], FretEvidence] = {}
     evidence = []
     hand_positions = []
+    finger_scores = []
     for note, group in zip(notes, note_frames):
         pitch = int(note["midi"])
         samples = []
@@ -123,12 +125,19 @@ def analyze_calibrated(
             if hand.position is not None:
                 hand_samples.append(hand.position)
         evidence.append(_merge_frame_scores(samples))
-        hand_positions.append(_stable_hand_position(hand_samples))
+        hand_position = _stable_hand_position(hand_samples)
+        hand_positions.append(hand_position)
+        finger_scores.append(score_fingers(pitch, [hands_by_frame.get(frame) for frame in group], hand_position))
 
-    selected = optimize_fingering(notes, evidence, hand_positions) if any(evidence) or any(hand_positions) else notes
+    finger_evidence = [{position: max(fingers.values()) for position, fingers in scores.items()} for scores in finger_scores]
+    selected = (
+        optimize_fingering(notes, evidence, hand_positions, finger_evidence)
+        if any(evidence) or any(hand_positions) or any(finger_evidence) else notes
+    )
+    fingers = assign_fingers(selected, finger_scores)
     return [
-        _annotate_note(original, optimized, observed, hand)
-        for original, optimized, observed, hand in zip(notes, selected, evidence, hand_positions)
+        _annotate_note(original, optimized, observed, hand, finger)
+        for original, optimized, observed, hand, finger in zip(notes, selected, evidence, hand_positions, fingers)
     ], observations
 
 
@@ -167,7 +176,9 @@ def _stable_hand_position(samples: list[HandPosition]) -> HandPosition | None:
     return HandPosition(sum(sample.anchor_fret for sample in inliers) / len(inliers), from_index=False)
 
 
-def _annotate_note(original: dict, selected: dict, evidence: FretEvidence, hand: HandPosition | None) -> dict:
+def _annotate_note(
+    original: dict, selected: dict, evidence: FretEvidence, hand: HandPosition | None, finger: str = "unknown",
+) -> dict:
     position = (selected["string"], selected["fret"])
     strength = evidence.get(position, 0)
     result = dict(selected, audio_string=original["string"], audio_fret=original["fret"], visual_confidence=round(strength, 3))
@@ -176,6 +187,7 @@ def _annotate_note(original: dict, selected: dict, evidence: FretEvidence, hand:
         result[field] = round(hand.anchor_fret, 1)
         if not hand.allows(position, evidence):
             return dict(result, visual_status="calibrated-conflict")
+    result["finger"] = finger
     if strength >= 0.5:
         return dict(result, visual_status="calibrated-visible", visual_string=position[0], visual_fret=position[1])
     changed = position != (original["string"], original["fret"])

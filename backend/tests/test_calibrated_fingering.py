@@ -1,9 +1,12 @@
 import unittest
 from types import SimpleNamespace
 
+import numpy as np
+
 from app.audio.fingering import HandPosition, optimize_fingering
 from app.video.calibrated_vision import _annotate_note, _stable_hand_position
-from app.video.fretboard import Fretboard, FretboardCalibration
+from app.video.finger_evidence import assign_fingers, score_fingers
+from app.video.fretboard import Fretboard, FretboardCalibration, HandObservation
 
 
 class CalibratedFingeringTests(unittest.TestCase):
@@ -52,3 +55,30 @@ class CalibratedFingeringTests(unittest.TestCase):
         self.assertFalse(observation.position.from_index)
         self.assertAlmostEqual(observation.position.anchor_fret, 8, places=5)
         self.assertIsNone(board.observe_hands([hand, hand]).position)
+
+    def test_middle_finger_approaches_d13_from_the_index_on_g12(self):
+        frames = [
+            HandObservation(np.empty((0, 2)), fingers=((12, 3), (13.6, 2.9), None, None)),
+            HandObservation(np.empty((0, 2)), fingers=((12, 3), (13.05, 2), None, None)),
+        ]
+        scores = score_fingers(63, frames, HandPosition(12))
+        note = dict(midi=63, string=4, fret=13, start_seconds=0)
+        self.assertEqual(assign_fingers([note], [scores]), ["middle"])
+        self.assertEqual(score_fingers(63, frames[:1], HandPosition(12)), {})
+
+    def test_fingertip_in_bass_zone_cannot_support_a_treble_candidate(self):
+        frame = HandObservation(np.empty((0, 2)), fingers=(None, (8, 0.4), None, None))
+        self.assertNotIn((3, 8), score_fingers(63, [frame, frame], None))
+
+    def test_finger_evidence_helps_rank_pitch_compatible_positions(self):
+        note = dict(midi=64, string=2, fret=5, start_seconds=0, confidence=1)
+        positional_evidence = [{(2, 5): 0.30, (3, 9): 0.72}]
+        [before] = optimize_fingering([note], positional_evidence, [HandPosition(5)])
+        [after] = optimize_fingering([note], positional_evidence, [HandPosition(5)], [{(3, 9): 0.9}])
+        self.assertEqual((before["string"], before["fret"]), (2, 5))
+        self.assertEqual((after["string"], after["fret"]), (3, 9))
+
+    def test_same_finger_at_different_frets_in_chord_is_ambiguous(self):
+        notes = [dict(string=3, fret=12, start_seconds=0), dict(string=4, fret=13, start_seconds=0.01)]
+        scores = [{(3, 12): {"middle": 0.8}}, {(4, 13): {"middle": 0.8}}]
+        self.assertEqual(assign_fingers(notes, scores), ["unknown", "unknown"])

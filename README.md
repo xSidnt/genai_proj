@@ -246,6 +246,8 @@ Choose **Single-note lead** for a passage with one melody note at a time. It kee
 
 ### Measure audio transcription quality
 
+See the [public benchmark report](BENCHMARK.md) for the lead preset, baseline model comparisons, and the GuiFiR-Vid vision test.
+
 Download matching `.wav` and `.jams` files from [EGSet12](https://zenodo.org/records/11406378) by Pedroza, Abreu, Corey, and Roman into the same directory. From `backend/`, run:
 
 ```bash
@@ -461,6 +463,8 @@ Use a standard-tuned guitar clip. Pause on a clear frame with visible fret wires
 OpenCV follows features on the marked fretboard and attempts to match the original calibration at the start of the range and at each measure boundary. The results report tracked frames and successful anchor matches. Frames where the tracker loses the neck contribute no visual evidence to string and fret assignment.
 
 MediaPipe runs once per selected frame near the detected audio onsets. The local pass scores pitch-compatible positions near the tracked fingertips and estimates the index finger’s fret. It uses other visible fingertips when the index is lifted or crosses the rest of the hand. A Viterbi-style beam search uses agreement across nearby frames, the hand’s estimated reach and movement, and the audio-based positions. It prefers comfortable chord shapes and distinct strings at simultaneous attacks. A colored note flags a pitch whose selected fingering falls outside the estimated reach. Hover to see the hand estimate. **Show audio-only positions** displays the original positions for the same note events. This comparison runs locally and leaves the saved transcription available to chat.
+
+For each note, the search also scores the four fingertips in the low E/A, D/G, and B/high e zones. It considers fingertip movement near the attack and uses one finger per fret from the index as a preference. Hover over a tab note to see its zone and any likely finger. Ambiguous fingers and open strings have no finger label.
 
 ### Configured vision provider
 

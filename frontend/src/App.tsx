@@ -16,28 +16,17 @@ function App() {
   return (
     <main className="app-shell">
       <header className="topbar">
-        <a className="brand" href="/" aria-label="croissantdough home">
-          <span className="brand-mark" aria-hidden="true">🥐</span>
-          <span>croissantdough</span>
+        <a className="brand" href="/" aria-label="CroissantDough home">
+          <img className="brand-mark" src="/croissantdough.png" alt="" width="46" height="25" />
+          <span>CroissantDough</span>
         </a>
 
-        <div className="topbar-center">Guitar transcription workspace</div>
-
-        <button className="button button-subtle" type="button">
-          New session
-        </button>
+        <span className="topbar-label">Guitar transcription workspace</span>
       </header>
 
       <section className="welcome">
-        <div>
-          <span className="eyebrow">YOUR AI PRACTICE SPACE</span>
-          <h1>Generate tabs from any video.</h1>
-          <p>Upload a performance, explore the tabs, and ask questions as you learn.</p>
-        </div>
-        <div className="step-indicator">
-          <span className="step-dot" />
-          Ready to start
-        </div>
+        <h1>Turn guitar videos into tabs.</h1>
+        <p>Upload a guitar video, follow the tab during playback, and ask about what you hear.</p>
       </section>
 
       <div className="workspace">
@@ -73,10 +62,6 @@ function App() {
           endSeconds={endSeconds}
         />
       </div>
-
-      <footer className="page-footer">
-        Your workspace · Transcriptions are examples until processing is connected
-      </footer>
     </main>
   )
 }

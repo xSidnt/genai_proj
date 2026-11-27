@@ -42,6 +42,7 @@ interface TabNote {
   technique_target_fret?: number | null
   bend_semitones?: number | null
   visual_status?: string
+  finger?: string
   visual_confidence?: number
   combined_confidence?: number
   visual_string?: number
@@ -175,6 +176,7 @@ export default function TabsPanel({
   const handPositionCount = activeTranscription?.notes.filter((note) => note.visual_index_fret != null).length ?? 0
   const fingertipPositionCount = activeTranscription?.notes.filter((note) => note.visual_hand_fret != null).length ?? 0
   const handConflictCount = activeTranscription?.notes.filter((note) => note.visual_status === 'calibrated-conflict').length ?? 0
+  const fingerCount = activeTranscription?.notes.filter((note) => note.finger && note.finger !== 'unknown').length ?? 0
   const changedCount = activeTranscription?.notes.filter((note) => note.audio_string != null && (
     note.string !== note.audio_string || note.fret !== note.audio_fret
   )).length ?? 0
@@ -187,7 +189,7 @@ export default function TabsPanel({
   const displayedNotes = activeTranscription?.notes.map((note) => showAudioPositions
     ? { ...note, string: note.audio_string ?? note.string, fret: note.audio_fret ?? note.fret,
         technique: note.technique === 'slide' ? null : note.technique, visual_status: undefined,
-        visual_index_fret: undefined, visual_hand_fret: undefined }
+        visual_index_fret: undefined, visual_hand_fret: undefined, finger: undefined }
     : note) ?? []
   const status = isTranscribing
     ? 'Analyzing…'
@@ -202,10 +204,7 @@ export default function TabsPanel({
   return (
     <section className="panel tabs-panel">
       <div className="panel-heading">
-        <div>
-          <span className="eyebrow">02 · TRANSCRIPTION</span>
-          <h2>Guitar tabs</h2>
-        </div>
+        <h2>Guitar tabs</h2>
         <span className="panel-status">{status}</span>
       </div>
 
@@ -319,6 +318,7 @@ export default function TabsPanel({
                     {activeTranscription.vision_seconds != null && ` · ${activeTranscription.vision_seconds.toFixed(2)}s vision time`}
                   </span>
                   <span>Hand position · {handPositionCount} notes from index · {fingertipPositionCount} from other fingertips · {handConflictCount} conflicts</span>
+                  <span>Fretting finger estimated for {fingerCount} of {activeTranscription.notes.length} notes</span>
                   <span>Sampled frames · {handFrames}/{observations.length} with hands · {fingertipFrames}/{observations.length} with fingertips in the marked area</span>
                   {activeTranscription.visionMode === 'tracked' ? (
                     <span>Fretboard tracked · {trackedFrames}/{observations.length} sampled frames · {reanchoredMeasures}/{measureAnchors.length} measure anchors matched</span>

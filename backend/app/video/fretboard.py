@@ -37,6 +37,8 @@ class FretboardCalibration(BaseModel):
 class HandObservation:
     fingertips: np.ndarray
     position: HandPosition | None = None
+    # Continuous fret and string coordinates, in index-to-pinky order.
+    fingers: tuple[tuple[float, float] | None, ...] = ()
 
 
 class Fretboard:
@@ -70,6 +72,7 @@ class Fretboard:
         near_strings = (x >= 0) & (x <= 1) & (y >= -0.5) & (y <= 5.5)
         active_hands = np.flatnonzero(near_strings.any(axis=1))
         position = None
+        fingers = ()
         # Two hands on the neck can tap beyond the fretting hand's reach.
         if len(active_hands) == 1:
             hand = active_hands[0]
@@ -82,7 +85,12 @@ class Fretboard:
             # A lifted or crossed index can give a poor estimate of the reachable frets.
             if position is None and near_strings[hand].sum() >= 2:
                 position = HandPosition(lowest_fret, from_index=False)
-        return HandObservation(projected[near_strings], position)
+            fingers = tuple(
+                (self._fret_at(float(tip_x)), float(tip_y))
+                if 0 <= tip_x <= 1 and -2 <= tip_y <= 7 else None
+                for tip_x, tip_y in projected[hand]
+            )
+        return HandObservation(projected[near_strings], position, fingers)
 
     def _fret_at(self, x: float) -> float:
         return float(np.interp(x, self.contact_positions, self.contact_frets))

@@ -13,6 +13,7 @@ interface TabNote {
   technique_target_fret?: number | null
   bend_semitones?: number | null
   visual_status?: string
+  finger?: string
   visual_index_fret?: number | null
   visual_hand_fret?: number | null
 }
@@ -32,6 +33,7 @@ const STRINGS = [
   { number: 5, tuning: 'A' },
   { number: 6, tuning: 'E' },
 ]
+const STRING_ZONES = ['B/high e', 'D/G', 'low E/A']
 
 const LEFT_GUTTER = 34
 const LANE_HEIGHT = 30
@@ -157,6 +159,8 @@ export default function GuitarTabStaff({
                   const handPosition = note.visual_index_fret != null
                     ? `, index finger near fret ${note.visual_index_fret.toFixed(1)}`
                     : note.visual_hand_fret != null ? `, hand near fret ${note.visual_hand_fret.toFixed(1)}` : ''
+                  const finger = note.finger && note.finger !== 'unknown' ? `, likely ${note.finger} finger` : ''
+                  const zone = note.visual_status ? `, ${STRING_ZONES[Math.floor(stringRow / 2)]} zone` : ''
 
                   return (
                     <span
@@ -167,7 +171,7 @@ export default function GuitarTabStaff({
                         top: `${stringRow * LANE_HEIGHT + LANE_HEIGHT / 2}px`,
                         opacity: Math.max(0.48, Math.min(1, note.confidence)),
                       }}
-                      title={`${note.pitch}, string ${note.string}, fret ${note.fret}, ${note.start_seconds.toFixed(2)}s, confidence ${(note.confidence * 100).toFixed(0)}%${technique ? `, ${technique}` : ''}${fingering}${handPosition}`}
+                      title={`${note.pitch}, string ${note.string}, fret ${note.fret}, ${note.start_seconds.toFixed(2)}s, confidence ${(note.confidence * 100).toFixed(0)}%${technique ? `, ${technique}` : ''}${fingering}${handPosition}${zone}${finger}`}
                     >
                       {note.fret}
                       {note.technique === 'bend' ? 'b' : note.technique === 'slide' ? '/' : ''}

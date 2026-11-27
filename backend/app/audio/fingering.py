@@ -30,10 +30,16 @@ class Path:
     frets_in_chord: tuple[int, ...]
 
 
+def pitch_positions(pitch: int) -> list[tuple[int, int]]:
+    return [(string, pitch - tuning) for string, tuning in TranscriptionService.STANDARD_TUNING.items()
+            if 0 <= pitch - tuning <= 24]
+
+
 def optimize_fingering(
     notes: list[dict],
     visual_evidence: list[FretEvidence] | None = None,
     hand_positions: list[HandPosition | None] | None = None,
+    finger_evidence: list[FretEvidence] | None = None,
 ) -> list[dict]:
     """Search pitch-compatible paths using fingertip and hand position evidence."""
     paths = [Path(0, (), None, frozenset(), ())]
@@ -50,12 +56,12 @@ def optimize_fingering(
         )
 
         pitch = note["midi"]
-        choices = [(string, pitch - tuning) for string, tuning in TranscriptionService.STANDARD_TUNING.items()
-                   if 0 <= pitch - tuning <= 24]
+        choices = pitch_positions(pitch)
         if not choices:
             choices = [(note["string"], note["fret"])]
 
         observed = visual_evidence[index] if visual_evidence is not None else {}
+        fingers = finger_evidence[index] if finger_evidence is not None else {}
         hand = hand_positions[index] if hand_positions is not None else None
         hand_shift = 0.0
         if new_chord and hand and previous_hand and hand.from_index and previous_hand.from_index:
@@ -71,7 +77,7 @@ def optimize_fingering(
             frets = () if new_chord else path.frets_in_chord
             for string, fret in choices:
                 position = (string, fret)
-                cost = path.cost + 0.08 * fret + (0.3 if fret == 0 else 0)
+                cost = path.cost + 0.08 * fret + (0.3 if fret == 0 else 0) - fingers.get(position, 0)
                 if visual_evidence is not None:
                     cost -= 4 * observed.get(position, 0)
                     if position != original:

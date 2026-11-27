@@ -87,10 +87,7 @@ export default function VideoPanel({
   return (
     <section className="panel video-panel">
       <div className="panel-heading">
-        <div>
-          <span className="eyebrow">01 · SOURCE</span>
-          <h2>Your video</h2>
-        </div>
+        <h2>Your video</h2>
         <span className="panel-status">{uploadStatus}</span>
       </div>
 
@@ -119,7 +116,7 @@ export default function VideoPanel({
           type="file"
           accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm"
           onChange={handleVideoChange}
-          hidden
+          className="upload-input"
         />
       </label>
 

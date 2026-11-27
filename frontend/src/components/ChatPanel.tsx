@@ -65,11 +65,7 @@ export default function ChatPanel({
   return (
     <section className="panel chat-panel">
       <div className="panel-heading">
-        <div>
-          <span className="eyebrow">03 · ASSISTANT</span>
-          <h2>Ask about your music</h2>
-        </div>
-        <span className="online-indicator">●</span>
+        <h2>Ask about your music</h2>
       </div>
 
       <div className="chat-messages" aria-live="polite">
